@@ -30,8 +30,8 @@ AWS_SECRET_ACCESS_KEY = os.getenv("SUPABASE_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("SUPABASE_REGION", "us-east-1") # Região do seu projeto no Supabase
 
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY") # Chave anon ou service_role
-# Deriva a URL base da API a partir do endpoint do S3
-SUPABASE_API_URL = SUPABASE_S3_ENDPOINT.split("/storage/")[0] if SUPABASE_S3_ENDPOINT else ""
+# Deriva a URL base da API a partir do endpoint do S3 (removendo o subdomínio .storage se existir)
+SUPABASE_API_URL = SUPABASE_S3_ENDPOINT.split("/storage/")[0].replace(".storage.", ".") if SUPABASE_S3_ENDPOINT else ""
 
 def fetch_tarefas_supabase():
     if not SUPABASE_API_URL or not SUPABASE_API_KEY:
