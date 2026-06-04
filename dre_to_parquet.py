@@ -27,11 +27,11 @@ CLIENT_ID = os.getenv("DRE_CLIENT_ID")
 CLIENT_SECRET = os.getenv("DRE_CLIENT_SECRET")
 
 # --- CONFIGURAÇÕES DE STORAGE (SUPABASE/S3) ---
-BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "seu-bucket-supabase")
-SUPABASE_URL = os.getenv("SUPABASE_S3_ENDPOINT", "https://seu-projeto.supabase.co/storage/v1/s3")
+BUCKET_NAME = os.getenv("SUPABASE_BUCKET")
+SUPABASE_URL = os.getenv("SUPABASE_S3_ENDPOINT")
 AWS_ACCESS_KEY_ID = os.getenv("SUPABASE_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("SUPABASE_SECRET_ACCESS_KEY")
-AWS_REGION = os.getenv("SUPABASE_REGION", "sa-east-1") # Região padrão do Supabase no BR
+AWS_REGION = os.getenv("SUPABASE_REGION", "us-east-1") # Região do seu projeto no Supabase
 
 # =======================================================
 # MAPEAMENTO DE SERVIDORES E CIDADES (Extraído do MD)
@@ -73,6 +73,7 @@ for cid, srv_id, cid_name in SUBLOJAS:
     TAREFAS.append({"servidor_id": srv_id, "loja": SERVIDORES.get(srv_id, f"Loja {srv_id}"), "cidade_id": cid, "cidade": cid_name})
 
 # A lista TAREFAS agora contém todos os 51 servidores e 32 sublojas prontos para execução!
+
 
 
 
