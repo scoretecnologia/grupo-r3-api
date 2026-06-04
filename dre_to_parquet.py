@@ -86,7 +86,7 @@ class DREToParquetPipeline:
                 aws_access_key_id=AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
                 region_name=AWS_REGION,
-                config=Config(signature_version="s3v4")
+                config=Config(signature_version="s3v4", s3={"addressing_style": "path"})
             )
             self.upload_enabled = True
         else:
