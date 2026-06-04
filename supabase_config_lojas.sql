@@ -5,7 +5,8 @@ CREATE TABLE public.grupo_r3_servidores (
     servidor_id INT PRIMARY KEY,
     nome TEXT NOT NULL,
     ativo BOOLEAN DEFAULT true NOT NULL,
-    carga_completa BOOLEAN DEFAULT false NOT NULL, -- true: histórico completo (desde 2025) / false: só mês atual
+    carga_completa BOOLEAN DEFAULT false NOT NULL, -- true: histórico completo (desde 2025) / false: usa mes_referencia
+    mes_referencia VARCHAR(7) DEFAULT '2026-06', -- formato YYYY-MM
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -19,7 +20,8 @@ CREATE TABLE public.grupo_r3_sublojas (
     servidor_id INT NOT NULL REFERENCES public.grupo_r3_servidores(servidor_id) ON DELETE CASCADE,
     nome TEXT NOT NULL,
     ativo BOOLEAN DEFAULT true NOT NULL,
-    carga_completa BOOLEAN DEFAULT false NOT NULL, -- true: histórico completo (desde 2025) / false: só mês atual
+    carga_completa BOOLEAN DEFAULT false NOT NULL, -- true: histórico completo (desde 2025) / false: usa mes_referencia
+    mes_referencia VARCHAR(7) DEFAULT '2026-06', -- formato YYYY-MM
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
