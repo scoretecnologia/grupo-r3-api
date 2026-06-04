@@ -57,7 +57,8 @@ def fetch_tarefas_supabase():
                     "loja": srv["nome"],
                     "cidade_id": None,
                     "cidade": None,
-                    "carga_completa": srv["carga_completa"]
+                    "carga_completa": srv["carga_completa"],
+                    "mes_referencia": srv.get("mes_referencia")
                 })
         else:
             logger.error(f"Erro ao buscar servidores no Supabase: {resp_srv.text}")
@@ -77,7 +78,8 @@ def fetch_tarefas_supabase():
                     "loja": nome_matriz,
                     "cidade_id": sub["cidade_id"],
                     "cidade": sub["nome"],
-                    "carga_completa": sub["carga_completa"]
+                    "carga_completa": sub["carga_completa"],
+                    "mes_referencia": sub.get("mes_referencia")
                 })
         else:
             logger.error(f"Erro ao buscar sublojas no Supabase: {resp_sub.text}")
@@ -143,16 +145,27 @@ class DREToParquetPipeline:
         
         logger.info(f"\n🔹 Buscando Servidor: {srv_id} ({tarefa['loja']}) | Cidade: {nome_cidade}")
         
-        logger.info(f"   ↳ Carga Completa (Histórico): {'Sim' if tarefa['carga_completa'] else 'Não (Somente mês atual)'}")
-        
         if tarefa['carga_completa']:
+            logger.info("   ↳ Tipo de Carga: Histórico Completo (desde 2025)")
             start_dt = pd.to_datetime("2025-01-01")
+            end_dt = pd.to_datetime(datetime.now().strftime("%Y-%m-%d"))
         else:
-            # Puxa do dia 1º do mês atual
-            now = datetime.now()
-            start_dt = pd.to_datetime(f"{now.year}-{now.month:02d}-01")
-            
-        end_dt = pd.to_datetime(datetime.now().strftime("%Y-%m-%d"))
+            mes_ref = tarefa.get('mes_referencia')
+            if mes_ref:
+                logger.info(f"   ↳ Tipo de Carga: Mês Específico ({mes_ref})")
+                try:
+                    start_dt = pd.to_datetime(f"{mes_ref}-01")
+                    end_dt = start_dt + pd.offsets.MonthEnd(1)
+                except Exception:
+                    logger.warning(f"     Aviso: Mês '{mes_ref}' inválido. Usando mês atual.")
+                    now = datetime.now()
+                    start_dt = pd.to_datetime(f"{now.year}-{now.month:02d}-01")
+                    end_dt = start_dt + pd.offsets.MonthEnd(1)
+            else:
+                logger.info("   ↳ Tipo de Carga: Mês Atual")
+                now = datetime.now()
+                start_dt = pd.to_datetime(f"{now.year}-{now.month:02d}-01")
+                end_dt = start_dt + pd.offsets.MonthEnd(1)
         
         for dt in pd.date_range(start_dt.replace(day=1), end_dt, freq='MS'):
             mes_inicio = max(start_dt, dt).strftime('%Y-%m-%d')
