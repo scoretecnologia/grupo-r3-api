@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 def log_header(msg):
     logger.info(f"\n{'='*60}\n🚀 {msg.upper()}\n{'='*60}")
 
-# --- PARÂMETROS FIXOS (MAIO 2026) ---
-DATA_INICIO = "2026-05-01"
-DATA_FIM = "2026-05-31"
+# --- PARÂMETROS FIXOS (A PARTIR DE 2025) ---
+DATA_INICIO = "2025-01-01"
+DATA_FIM = datetime.now().strftime("%Y-%m-%d")
 
 # --- CONFIGURAÇÕES DA API DRE ---
 API_URL = "https://continental.feiraodovinte.com.br/api/integracao/dre-detalhado"
@@ -74,6 +74,8 @@ for cid, srv_id, cid_name in SUBLOJAS:
 
 # A lista TAREFAS agora contém todos os 51 servidores e 32 sublojas prontos para execução!
 
+
+
 class DREToParquetPipeline:
     def __init__(self):
         # Configurando S3 Client apontando para o Supabase
@@ -125,54 +127,64 @@ class DREToParquetPipeline:
         
         logger.info(f"\n🔹 Buscando Servidor: {srv_id} ({tarefa['loja']}) | Cidade: {nome_cidade}")
         
-        dados = self.fetch_dre(srv_id, DATA_INICIO, DATA_FIM, cid_id)
+        start_dt = pd.to_datetime(DATA_INICIO)
+        end_dt = pd.to_datetime(DATA_FIM)
         
-        if not dados:
-            logger.info("   ↳ Nenhum dado encontrado ou erro na extração.")
-            return
+        for dt in pd.date_range(start_dt.replace(day=1), end_dt, freq='MS'):
+            mes_inicio = max(start_dt, dt).strftime('%Y-%m-%d')
+            mes_fim = min(end_dt, dt + pd.offsets.MonthEnd(1)).strftime('%Y-%m-%d')
             
-        df = pd.DataFrame(dados)
-        if df.empty:
-            logger.info("   ↳ Tabela retornou vazia.")
-            return
+            logger.info(f"   📅 Período: {mes_inicio} a {mes_fim}")
+            dados = self.fetch_dre(srv_id, mes_inicio, mes_fim, cid_id)
             
-        # Adicionando as colunas solicitadas
-        df['id_servidor'] = srv_id
-        df['loja'] = tarefa['loja']
-        # Se for matriz, colocamos 0, -1 ou None? A pedido, nulo se não houver. Pandas usa None/pd.NA
-        df['id_cidade'] = cid_id if cid_id else None
-        df['cidade'] = nome_cidade
-        
-        # Padronizando tipos para evitar problemas no Parquet
-        # Transforma tudo para string que for objeto e garante numéricos onde deve
-        for col in ['debito', 'credito', 'valorLiquido']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
-        # Gerando o nome do arquivo
-        prefixo_cidade = f"{cid_id}" if cid_id else "0"
-        file_name = f"dre_detalhado_{srv_id}_{prefixo_cidade}_{DATA_INICIO}_{DATA_FIM}.parquet"
-        
-        # Caminho no bucket (ex: raw/dre/2026-05/nome.parquet)
-        s3_key = f"raw/dre/{DATA_INICIO[:7]}/{file_name}"
-        
-        # Convertendo para Parquet
-        buffer = io.BytesIO()
-        df.to_parquet(buffer, engine="pyarrow", index=False)
-        buffer.seek(0)
-        
-        if self.upload_enabled:
-            try:
-                self.s3_client.put_object(Bucket=BUCKET_NAME, Key=s3_key, Body=buffer.getvalue())
-                logger.info(f"   ✅ Salvo no Supabase: {s3_key} ({len(df)} linhas)")
-            except Exception as e:
-                logger.error(f"   ❌ Erro ao subir para o Supabase: {str(e)}")
-        else:
-            # Salva localmente se não tiver credencial configurada
-            os.makedirs("output_parquet", exist_ok=True)
-            local_path = os.path.join("output_parquet", file_name)
-            df.to_parquet(local_path, engine="pyarrow", index=False)
-            logger.info(f"   ✅ Salvo Localmente: {local_path} ({len(df)} linhas)")
+            if not dados:
+                logger.info("      ↳ Nenhum dado encontrado ou erro na extração.")
+                continue
+                
+            df = pd.DataFrame(dados)
+            if df.empty:
+                logger.info("      ↳ Tabela retornou vazia.")
+                continue
+                
+            # Adicionando as colunas solicitadas
+            df['id_servidor'] = srv_id
+            df['loja'] = tarefa['loja']
+            # Se for matriz, colocamos 0, -1 ou None? A pedido, nulo se não houver. Pandas usa None/pd.NA
+            df['id_cidade'] = cid_id if cid_id else None
+            df['cidade'] = nome_cidade
+            
+            # Padronizando tipos para evitar problemas no Parquet
+            # Transforma tudo para string que for objeto e garante numéricos onde deve
+            for col in ['debito', 'credito', 'valorLiquido']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+            # Gerando o nome do arquivo com as datas mensais
+            prefixo_cidade = f"{cid_id}" if cid_id else "0"
+            file_name = f"dre_detalhado_{srv_id}_{prefixo_cidade}_{mes_inicio}_{mes_fim}.parquet"
+            
+            # Caminho no bucket (ex: raw/dre/2026-05/nome.parquet)
+            s3_key = f"raw/dre/{mes_inicio[:7]}/{file_name}"
+            
+            # Convertendo para Parquet
+            buffer = io.BytesIO()
+            df.to_parquet(buffer, engine="pyarrow", index=False)
+            buffer.seek(0)
+            
+            if self.upload_enabled:
+                try:
+                    self.s3_client.put_object(Bucket=BUCKET_NAME, Key=s3_key, Body=buffer.getvalue())
+                    logger.info(f"      ✅ Salvo no Supabase: {s3_key} ({len(df)} linhas)")
+                except Exception as e:
+                    logger.error(f"      ❌ Erro ao subir para o Supabase: {str(e)}")
+            else:
+                # Salva localmente se não tiver credencial configurada
+                os.makedirs("output_parquet", exist_ok=True)
+                local_path = os.path.join("output_parquet", file_name)
+                df.to_parquet(local_path, engine="pyarrow", index=False)
+                logger.info(f"      ✅ Salvo Localmente: {local_path} ({len(df)} linhas)")
+                
+            time.sleep(1) # Pausa amigável para não sobrecarregar a API entre os meses
 
 if __name__ == "__main__":
     start_time = datetime.now()
