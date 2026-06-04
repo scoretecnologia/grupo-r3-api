@@ -15,10 +15,6 @@ logger = logging.getLogger(__name__)
 def log_header(msg):
     logger.info(f"\n{'='*60}\n🚀 {msg.upper()}\n{'='*60}")
 
-# --- PARÂMETROS FIXOS (A PARTIR DE 2025) ---
-DATA_INICIO = "2025-01-01"
-DATA_FIM = datetime.now().strftime("%Y-%m-%d")
-
 # --- CONFIGURAÇÕES DA API DRE ---
 API_URL = "https://continental.feiraodovinte.com.br/api/integracao/dre-detalhado"
 # Podem vir de variáveis de ambiente no Kestra
@@ -26,53 +22,69 @@ API_KEY = os.getenv("DRE_API_KEY")
 CLIENT_ID = os.getenv("DRE_CLIENT_ID")
 CLIENT_SECRET = os.getenv("DRE_CLIENT_SECRET")
 
-# --- CONFIGURAÇÕES DE STORAGE (SUPABASE/S3) ---
+# --- CONFIGURAÇÕES DE STORAGE (SUPABASE/S3) E BANCO ---
 BUCKET_NAME = os.getenv("SUPABASE_BUCKET")
-SUPABASE_URL = os.getenv("SUPABASE_S3_ENDPOINT")
+SUPABASE_S3_ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT", "")
 AWS_ACCESS_KEY_ID = os.getenv("SUPABASE_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("SUPABASE_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("SUPABASE_REGION", "us-east-1") # Região do seu projeto no Supabase
 
-# =======================================================
-# MAPEAMENTO DE SERVIDORES E CIDADES (Extraído do MD)
-# =======================================================
-SERVIDORES = {
-    1: "Santa Quitéria", 2: "Guaraciaba", 3: "Crateús", 4: "Ipu", 5: "Piripiri",
-    6: "Pedro II", 7: "São Bernardo", 8: "Varjota", 9: "Camocim", 10: "Barras",
-    11: "Boa Viagem", 12: "Canindé", 13: "São Benedito", 14: "Sobral", 15: "Tianguá",
-    19: "Martinopole", 20: "Granja", 21: "Pedra Branca", 22: "São João da Fronteira",
-    23: "Quixeramobim", 24: "Maraba", 26: "Pitbull", 27: "Barroquinha", 28: "Barreirinhas",
-    29: "Mucambo", 30: "Pacujá", 32: "Hidrolândia", 33: "Croatá", 35: "Domingo Mourão",
-    36: "Piracuruca", 37: "Petrolina", 38: "Parazinho", 39: "Alto Lindo", 43: "Marco",
-    44: "Catunda", 45: "Poranga", 46: "Centro de Piripiri", 47: "Baturite", 48: "Juazeiro do Norte",
-    49: "Tamboril", 50: "Guaraciaba Nova", 51: "Chaval", 52: "São Miguel", 53: "Campanario",
-    54: "Acarape", 55: "Jijoca", 56: "Trairi", 57: "Senador Pompeu", 58: "Moraújo",
-    59: "Pimenteiras", 60: "Carnaubal"
-}
+SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY") # Chave anon ou service_role
+# Deriva a URL base da API a partir do endpoint do S3
+SUPABASE_API_URL = SUPABASE_S3_ENDPOINT.split("/storage/")[0] if SUPABASE_S3_ENDPOINT else ""
 
-SUBLOJAS = [
-    (7, 2, "Carnaúbal"), (8, 2, "São Benedito"), (9, 2, "Morrinhos"), (10, 2, "Croata"),
-    (11, 2, "Viçosa"), (12, 2, "Cocal"), (13, 1, "Nova Russas"), (14, 1, "Monsenhor Tabosa"),
-    (15, 1, "Ipueiras"), (16, 1, "Catunda"), (17, 1, "Tamboril"), (18, 1, "Nova Fátima"),
-    (19, 3, "Sucesso"), (20, 3, "Murruais"), (21, 3, "Buriti dos Montes"), (22, 3, "Assunção"),
-    (23, 3, "Castelo do Piaui"), (26, 5, "Centro de Piripiri"), (27, 5, "Atacadão dos Plásticos"),
-    (28, 6, "Esperantina"), (29, 6, "Batalha"), (30, 6, "Luzilândia"), (31, 7, "Tutóia"),
-    (32, 8, "Groairas"), (33, 13, "São Benedito 2"), (35, 3, "Novo Oriente"), (36, 3, "Quiterianópolis"),
-    (37, 22, "São João do Divino"), (38, 5, "Matias Olimpio"), (39, 2, "Reriutaba"), (41, 8, "Cariré"),
-    (42, 38, "Timonha")
-]
+def fetch_tarefas_supabase():
+    if not SUPABASE_API_URL or not SUPABASE_API_KEY:
+        logger.error("SUPABASE_S3_ENDPOINT ou SUPABASE_API_KEY não configurados. Impossível buscar lojas.")
+        return []
+    
+    headers = {
+        "apikey": SUPABASE_API_KEY,
+        "Authorization": f"Bearer {SUPABASE_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    tarefas = []
+    
+    # 1. Buscar servidores (matrizes)
+    try:
+        url_srv = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_servidores?ativo=eq.true"
+        resp_srv = requests.get(url_srv, headers=headers)
+        if resp_srv.status_code == 200:
+            for srv in resp_srv.json():
+                tarefas.append({
+                    "servidor_id": srv["servidor_id"],
+                    "loja": srv["nome"],
+                    "cidade_id": None,
+                    "cidade": None,
+                    "carga_completa": srv["carga_completa"]
+                })
+        else:
+            logger.error(f"Erro ao buscar servidores no Supabase: {resp_srv.text}")
+    except Exception as e:
+        logger.error(f"Erro de conexão com Supabase (servidores): {e}")
 
-# Construindo a lista de execuções
-TAREFAS = []
-# 1. Adiciona as Lojas Matriz (sem cidadeId)
-for srv_id, loja_name in SERVIDORES.items():
-    TAREFAS.append({"servidor_id": srv_id, "loja": loja_name, "cidade_id": None, "cidade": None})
-
-# 2. Adiciona as Sublojas
-for cid, srv_id, cid_name in SUBLOJAS:
-    TAREFAS.append({"servidor_id": srv_id, "loja": SERVIDORES.get(srv_id, f"Loja {srv_id}"), "cidade_id": cid, "cidade": cid_name})
-
-# A lista TAREFAS agora contém todos os 51 servidores e 32 sublojas prontos para execução!
+    # 2. Buscar sublojas
+    try:
+        url_sub = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_sublojas?ativo=eq.true"
+        resp_sub = requests.get(url_sub, headers=headers)
+        if resp_sub.status_code == 200:
+            for sub in resp_sub.json():
+                # Encontrar nome da matriz correspondente
+                nome_matriz = next((t["loja"] for t in tarefas if t["servidor_id"] == sub["servidor_id"] and t["cidade_id"] is None), f"Matriz {sub['servidor_id']}")
+                tarefas.append({
+                    "servidor_id": sub["servidor_id"],
+                    "loja": nome_matriz,
+                    "cidade_id": sub["cidade_id"],
+                    "cidade": sub["nome"],
+                    "carga_completa": sub["carga_completa"]
+                })
+        else:
+            logger.error(f"Erro ao buscar sublojas no Supabase: {resp_sub.text}")
+    except Exception as e:
+        logger.error(f"Erro de conexão com Supabase (sublojas): {e}")
+        
+    return tarefas
 
 
 
@@ -83,7 +95,7 @@ class DREToParquetPipeline:
         if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
             self.s3_client = boto3.client(
                 "s3",
-                endpoint_url=SUPABASE_URL,
+                endpoint_url=SUPABASE_S3_ENDPOINT,
                 aws_access_key_id=AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
                 region_name=AWS_REGION,
@@ -113,6 +125,9 @@ class DREToParquetPipeline:
                 elif response.status_code == 429: # Rate limit
                     logger.warning(f"Rate limit. Aguardando 10s... (Tentativa {tentativa+1}/{retries})")
                     time.sleep(10)
+                elif response.status_code in [500, 502, 503, 504]: # Erros temporários no servidor
+                    logger.warning(f"Erro interno da API ({response.status_code}). Aguardando 5s... (Tentativa {tentativa+1}/{retries})")
+                    time.sleep(5)
                 else:
                     logger.error(f"Erro {response.status_code}: {response.text}")
                     return None
@@ -128,8 +143,16 @@ class DREToParquetPipeline:
         
         logger.info(f"\n🔹 Buscando Servidor: {srv_id} ({tarefa['loja']}) | Cidade: {nome_cidade}")
         
-        start_dt = pd.to_datetime(DATA_INICIO)
-        end_dt = pd.to_datetime(DATA_FIM)
+        logger.info(f"   ↳ Carga Completa (Histórico): {'Sim' if tarefa['carga_completa'] else 'Não (Somente mês atual)'}")
+        
+        if tarefa['carga_completa']:
+            start_dt = pd.to_datetime("2025-01-01")
+        else:
+            # Puxa do dia 1º do mês atual
+            now = datetime.now()
+            start_dt = pd.to_datetime(f"{now.year}-{now.month:02d}-01")
+            
+        end_dt = pd.to_datetime(datetime.now().strftime("%Y-%m-%d"))
         
         for dt in pd.date_range(start_dt.replace(day=1), end_dt, freq='MS'):
             mes_inicio = max(start_dt, dt).strftime('%Y-%m-%d')
@@ -185,17 +208,20 @@ class DREToParquetPipeline:
                 df.to_parquet(local_path, engine="pyarrow", index=False)
                 logger.info(f"      ✅ Salvo Localmente: {local_path} ({len(df)} linhas)")
                 
-            time.sleep(1) # Pausa amigável para não sobrecarregar a API entre os meses
+            time.sleep(3) # Pausa amigável para não sobrecarregar a API entre os meses
 
 if __name__ == "__main__":
     start_time = datetime.now()
-    log_header(f"Iniciando Extração DRE para Parquet ({DATA_INICIO} a {DATA_FIM})")
+    log_header("Iniciando Extração DRE para Parquet (Com leitura do Supabase)")
     
     pipeline = DREToParquetPipeline()
+    tarefas = fetch_tarefas_supabase()
     
-    for idx, t in enumerate(TAREFAS):
+    logger.info(f"Lojas ativas encontradas para processamento: {len(tarefas)}")
+    
+    for idx, t in enumerate(tarefas):
         pipeline.process_task(t)
-        time.sleep(1) # Pausa amigável para não sobrecarregar a API
+        time.sleep(3) # Pausa amigável para não sobrecarregar a API
         
     duration = datetime.now() - start_time
     log_header(f"Extração Finalizada. Duração Total: {duration}")

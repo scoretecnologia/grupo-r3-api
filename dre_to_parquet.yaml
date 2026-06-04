@@ -16,6 +16,7 @@ tasks:
       SUPABASE_SECRET_ACCESS_KEY: "{{ kv('SUPABASE_SECRET_ACCESS_KEY') }}"
       SUPABASE_BUCKET: "{{ kv('SUPABASE_BUCKET') }}"
       SUPABASE_S3_ENDPOINT: "{{ kv('SUPABASE_S3_ENDPOINT') }}"
+      SUPABASE_API_KEY: "{{ kv('SUPABASE_API_KEY') }}"
       SUPABASE_REGION: "us-east-1"
     script: |
       import sys
