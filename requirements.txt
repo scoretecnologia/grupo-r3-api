@@ -1,0 +1,5 @@
+requests
+rich
+pandas
+pyarrow
+boto3

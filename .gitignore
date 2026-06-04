@@ -1,0 +1,5 @@
+.venv/
+output_parquet/
+__pycache__/
+.env
+*.pyc
