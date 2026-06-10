@@ -148,7 +148,9 @@ class DREToParquetPipeline:
         if tarefa['carga_completa']:
             logger.info("   ↳ Tipo de Carga: Histórico Completo (desde 2025)")
             start_dt = pd.to_datetime("2025-01-01")
-            end_dt = pd.to_datetime(datetime.now().strftime("%Y-%m-%d"))
+            now = datetime.now()
+            # Força o end_dt para o ÚLTIMO dia do mês atual, para manter o mesmo padrão de nome de arquivo
+            end_dt = pd.to_datetime(f"{now.year}-{now.month:02d}-01") + pd.offsets.MonthEnd(1)
         else:
             mes_ref = tarefa.get('mes_referencia')
             if mes_ref:
