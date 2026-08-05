@@ -1,372 +1,557 @@
-import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState, useMemo } from "react";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/external";
+import * as XLSX from "xlsx";
 import {
   Database,
-  FolderOpen,
   FileSpreadsheet,
-  ChevronDown,
-  Loader2,
-  Calendar,
-  HardDrive,
-  RefreshCw,
   Download,
   Search,
+  Filter,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  Building2,
+  MapPin,
+  Calendar,
+  Layers,
+  DollarSign,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/catalogo")({
   component: CatalogoPage,
 });
 
-const BUCKET = "grupo-r3";
-const BASE_PATH = "raw/dre";
-
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value || 0);
 }
 
-function formatDate(dateStr: string): string {
+function formatDateStr(dateStr?: string | null): string {
+  if (!dateStr) return "—";
   try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const parts = dateStr.split("T")[0].split("-");
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    return dateStr;
   } catch {
     return dateStr;
   }
 }
 
-function CatalogoPage() {
-  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
-  const [search, setSearch] = useState("");
-
-  // Fetch date folders inside raw/dre
-  const foldersQuery = useQuery({
-    queryKey: ["catalogo-folders"],
-    queryFn: async () => {
-      const { data, error } = await supabase.storage
-        .from(BUCKET)
-        .list(BASE_PATH, { sortBy: { column: "name", order: "desc" } });
-      if (error) throw error;
-      // Only return folders (items without metadata / no id means folder)
-      return (data ?? []).filter(
-        (item) => item.id === null || item.metadata === null,
-      );
-    },
-  });
-
-  const filteredFolders = (foldersQuery.data ?? []).filter((f) =>
-    search.trim()
-      ? f.name.toLowerCase().includes(search.trim().toLowerCase())
-      : true,
-  );
-
-  const toggleFolder = (name: string) => {
-    setOpenFolders((prev) => {
-      const n = new Set(prev);
-      n.has(name) ? n.delete(name) : n.add(name);
-      return n;
-    });
-  };
-
-  const totalFolders = foldersQuery.data?.length ?? 0;
-
-  return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5 mb-1">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-              <Database className="h-4 w-4 text-primary" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              Catálogo de Dados
-            </h1>
-          </div>
-          <p className="text-sm text-muted-foreground ml-[42px]">
-            Explore os arquivos DRE armazenados no bucket{" "}
-            <code className="text-xs bg-muted px-1.5 py-0.5 rounded-md font-mono">
-              {BUCKET}
-            </code>
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => foldersQuery.refetch()}
-            disabled={foldersQuery.isFetching}
-            className="rounded-xl h-9 text-xs font-medium border-border/50 hover:border-primary/30 hover:bg-primary/5 transition-all gap-1.5"
-          >
-            <RefreshCw
-              className={cn(
-                "h-3.5 w-3.5",
-                foldersQuery.isFetching && "animate-spin",
-              )}
-            />
-            Atualizar
-          </Button>
-          <Button
-            asChild
-            className="rounded-xl h-9 text-xs font-medium hover:shadow-lg hover:shadow-primary/20 transition-all"
-          >
-            <Link to="/catalogo-tabela">Ver Tabela Consolidada</Link>
-          </Button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <Card className="p-4 rounded-xl border-border/40 bg-card/80 backdrop-blur-sm hover:border-primary/20 transition-all group">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                Períodos
-              </p>
-              <p className="text-2xl font-bold mt-1">{totalFolders}</p>
-            </div>
-            <div className="h-10 w-10 rounded-xl bg-primary/8 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
-              <Calendar className="h-5 w-5 text-primary/70" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4 rounded-xl border-border/40 bg-card/80 backdrop-blur-sm hover:border-primary/20 transition-all group">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                Bucket
-              </p>
-              <p className="text-lg font-bold mt-1 font-mono">{BUCKET}</p>
-            </div>
-            <div className="h-10 w-10 rounded-xl bg-primary/8 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
-              <HardDrive className="h-5 w-5 text-primary/70" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4 rounded-xl border-border/40 bg-card/80 backdrop-blur-sm hover:border-primary/20 transition-all group col-span-2 sm:col-span-1">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                Caminho
-              </p>
-              <p className="text-sm font-bold mt-1 font-mono text-muted-foreground">
-                /{BASE_PATH}
-              </p>
-            </div>
-            <div className="h-10 w-10 rounded-xl bg-primary/8 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
-              <FolderOpen className="h-5 w-5 text-primary/70" />
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
-        <Input
-          placeholder="Filtrar por período (ex.: 2026-06)..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-11 h-11 rounded-xl bg-card/80 border-border/40 focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
-        />
-      </div>
-
-      {/* Folder list */}
-      <div className="space-y-2">
-        {foldersQuery.isLoading ? (
-          <Card className="p-16 flex items-center justify-center text-muted-foreground rounded-xl border-border/40">
-            <Loader2 className="h-5 w-5 animate-spin mr-2 text-primary" />{" "}
-            Carregando pastas...
-          </Card>
-        ) : foldersQuery.isError ? (
-          <Card className="p-16 text-center text-destructive rounded-xl border-destructive/20 bg-destructive/5">
-            <p className="font-medium">Erro ao carregar dados</p>
-            <p className="text-xs mt-1 text-muted-foreground">
-              {(foldersQuery.error as Error).message}
-            </p>
-          </Card>
-        ) : filteredFolders.length === 0 ? (
-          <Card className="p-16 text-center text-muted-foreground rounded-xl border-border/40 border-dashed">
-            <FolderOpen className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
-            <p className="font-medium">Nenhum período encontrado</p>
-            <p className="text-xs mt-1">
-              {search
-                ? "Tente outro filtro."
-                : "Nenhuma pasta de data encontrada no caminho."}
-            </p>
-          </Card>
-        ) : (
-          filteredFolders.map((folder, idx) => (
-            <DateFolderCard
-              key={folder.name}
-              folderName={folder.name}
-              isOpen={openFolders.has(folder.name)}
-              onToggle={() => toggleFolder(folder.name)}
-              animationDelay={idx * 30}
-            />
-          ))
-        )}
-      </div>
-    </div>
-  );
+function exportToXLSX(data: any[], filename: string) {
+  if (!data || data.length === 0) return;
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Dados");
+  XLSX.writeFile(workbook, `${filename}.xlsx`);
 }
 
-function DateFolderCard({
-  folderName,
-  isOpen,
-  onToggle,
-  animationDelay,
-}: {
-  folderName: string;
-  isOpen: boolean;
-  onToggle: () => void;
-  animationDelay: number;
-}) {
-  // Fetch files inside the date folder when open
-  const filesQuery = useQuery({
-    queryKey: ["catalogo-files", folderName],
+function CatalogoPage() {
+  const [activeTab, setActiveTab] = useState<"dre" | "faturamento">("dre");
+  const [search, setSearch] = useState("");
+  const [selectedServidor, setSelectedServidor] = useState<string>("todos");
+  const [selectedCidade, setSelectedCidade] = useState<string>("todas");
+  const [selectedYear, setSelectedYear] = useState<string>("todos");
+  
+  // Paginação
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // Resetar paginação ao mudar filtros
+  const handleFilterChange = () => {
+    setPage(1);
+  };
+
+  // Queries
+  const servidoresQ = useQuery({
+    queryKey: ["servidores-list-cat"],
     queryFn: async () => {
-      const { data, error } = await supabase.storage
-        .from(BUCKET)
-        .list(`${BASE_PATH}/${folderName}`, {
-          sortBy: { column: "name", order: "asc" },
-        });
+      const { data, error } = await supabase.from("grupo_r3_servidores" as never).select("*").order("nome");
       if (error) throw error;
-      return (data ?? []).filter(
-        (item) => item.name.endsWith(".parquet"),
-      );
+      return data as any[];
     },
-    enabled: isOpen,
   });
 
-  const handleDownload = async (fileName: string) => {
-    const { data } = supabase.storage
-      .from(BUCKET)
-      .getPublicUrl(`${BASE_PATH}/${folderName}/${fileName}`);
-    if (data?.publicUrl) {
-      window.open(data.publicUrl, "_blank");
+  const sublojasQ = useQuery({
+    queryKey: ["sublojas-list-cat"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("grupo_r3_sublojas" as never).select("*").order("nome");
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const dreQ = useQuery({
+    queryKey: ["dre-catalogo-all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("grupo_r3_dre_detalhado" as never)
+        .select("*")
+        .order("mes_inicio", { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const faturamentoQ = useQuery({
+    queryKey: ["faturamento-catalogo-all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("grupo_r3_faturamento_loja" as never)
+        .select("*")
+        .order("mes_inicio", { ascending: false });
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+
+  const isLoading = dreQ.isLoading || faturamentoQ.isLoading;
+
+  // Sublojas filtradas por matriz
+  const filteredSublojas = useMemo(() => {
+    if (selectedServidor === "todos") return sublojasQ.data ?? [];
+    return (sublojasQ.data ?? []).filter((s) => String(s.servidor_id) === selectedServidor);
+  }, [sublojasQ.data, selectedServidor]);
+
+  // Lista de anos disponíveis
+  const availableYears = useMemo(() => {
+    const setY = new Set<string>();
+    (dreQ.data ?? []).forEach((item) => {
+      if (item.mes_inicio) setY.add(item.mes_inicio.substring(0, 4));
+    });
+    (faturamentoQ.data ?? []).forEach((item) => {
+      if (item.mes_inicio) setY.add(item.mes_inicio.substring(0, 4));
+    });
+    return Array.from(setY).sort().reverse();
+  }, [dreQ.data, faturamentoQ.data]);
+
+  // --- FILTRAGEM DRE DETALHADO ---
+  const filteredDreData = useMemo(() => {
+    let list = dreQ.data ?? [];
+
+    if (selectedYear !== "todos") {
+      list = list.filter((item) => item.mes_inicio && item.mes_inicio.startsWith(selectedYear));
+    }
+    if (selectedServidor !== "todos") {
+      list = list.filter((item) => String(item.id_servidor) === selectedServidor);
+    }
+    if (selectedCidade !== "todas") {
+      list = list.filter((item) => String(item.id_cidade) === selectedCidade);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (item) =>
+          (item.loja && item.loja.toLowerCase().includes(q)) ||
+          (item.cidade && item.cidade.toLowerCase().includes(q)) ||
+          (item.codigo_conta && item.codigo_conta.toLowerCase().includes(q)) ||
+          (item.descricao_conta && item.descricao_conta.toLowerCase().includes(q)) ||
+          (item.categoria && item.categoria.toLowerCase().includes(q))
+      );
+    }
+
+    return list;
+  }, [dreQ.data, selectedYear, selectedServidor, selectedCidade, search]);
+
+  // --- FILTRAGEM FATURAMENTO LOJA ---
+  const filteredFatData = useMemo(() => {
+    let list = faturamentoQ.data ?? [];
+
+    if (selectedYear !== "todos") {
+      list = list.filter((item) => item.mes_inicio && item.mes_inicio.startsWith(selectedYear));
+    }
+    if (selectedServidor !== "todos") {
+      list = list.filter((item) => String(item.id_servidor) === selectedServidor);
+    }
+    if (selectedCidade !== "todas") {
+      list = list.filter((item) => String(item.id_cidade) === selectedCidade);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (item) =>
+          (item.loja && item.loja.toLowerCase().includes(q)) ||
+          (item.cidade && item.cidade.toLowerCase().includes(q)) ||
+          (item.codigo_loja && String(item.codigo_loja).includes(q))
+      );
+    }
+
+    return list;
+  }, [faturamentoQ.data, selectedYear, selectedServidor, selectedCidade, search]);
+
+  // --- PAGINAÇÃO DOS DADOS ATUAIS ---
+  const activeDataList = activeTab === "dre" ? filteredDreData : filteredFatData;
+  const totalCount = activeDataList.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return activeDataList.slice(start, start + pageSize);
+  }, [activeDataList, currentPage, pageSize]);
+
+  // --- HANDLER DE EXPORTAÇÃO EXCEL ---
+  const handleExportXLSX = () => {
+    if (activeTab === "dre") {
+      const exportRows = filteredDreData.map((item) => ({
+        ID: item.id,
+        Loja: item.loja,
+        Cidade: item.cidade,
+        "Mês Início": item.mes_inicio,
+        "Mês Fim": item.mes_fim,
+        "Código Conta": item.codigo_conta || "",
+        "Descrição Conta": item.descricao_conta || "",
+        Categoria: item.categoria || "",
+        Débito: Number(item.debito) || 0,
+        Crédito: Number(item.credito) || 0,
+        "Valor Líquido": Number(item.valor_liquido) || 0,
+      }));
+      exportToXLSX(exportRows, `DRE_Detalhado_Grupo_R3_${new Date().toISOString().substring(0, 10)}`);
+    } else {
+      const exportRows = filteredFatData.map((item) => ({
+        ID: item.id,
+        Loja: item.loja,
+        Cidade: item.cidade,
+        "Código Loja": item.codigo_loja || "",
+        "Mês Início": item.mes_inicio,
+        "Mês Fim": item.mes_fim,
+        "Total Faturamento": Number(item.total_faturamento) || 0,
+        "Criado Em": formatDateStr(item.created_at),
+      }));
+      exportToXLSX(exportRows, `Faturamento_Lojas_Grupo_R3_${new Date().toISOString().substring(0, 10)}`);
     }
   };
 
   return (
-    <Card
-      className="overflow-hidden p-0 rounded-xl border-border/40 hover:border-border/80 transition-all animate-slide-up"
-      style={{ animationDelay: `${animationDelay}ms` }}
-    >
-      {/* Folder header */}
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-3 w-full p-4 text-left group"
-      >
-        <ChevronDown
-          className={cn(
-            "h-4 w-4 text-muted-foreground/50 transition-transform duration-200 shrink-0",
-            isOpen && "rotate-180",
-          )}
-        />
-        <div
-          className={cn(
-            "flex h-10 w-10 items-center justify-center rounded-xl shrink-0 transition-colors",
-            isOpen
-              ? "bg-primary/15 text-primary"
-              : "bg-muted/80 text-muted-foreground/60",
-          )}
-        >
-          <FolderOpen className="h-4.5 w-4.5" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm">{folderName}</span>
-            {isOpen && filesQuery.data && (
-              <Badge
-                variant="secondary"
-                className="text-[10px] rounded-md bg-muted/80 border-0"
-              >
-                {filesQuery.data.length} arquivo
-                {filesQuery.data.length === 1 ? "" : "s"}
-              </Badge>
-            )}
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1700px] mx-auto animate-fade-in text-foreground bg-background">
+      {/* Cabeçalho */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
+        <div>
+          <div className="flex items-center gap-2.5 mb-1">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Database className="h-4 w-4" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+              Catálogo de Dados Financeiros
+            </h1>
           </div>
-          <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">
-            {BASE_PATH}/{folderName}/
+          <p className="text-sm text-muted-foreground ml-[42px]">
+            Exploração direta do banco de dados Supabase PostgreSQL (DRE Detalhado e Faturamento por Loja).
           </p>
         </div>
-      </button>
 
-      {/* File list */}
-      {isOpen && (
-        <div className="border-t border-border/30 bg-muted/20 px-4 py-3">
-          {filesQuery.isLoading ? (
-            <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin mr-2 text-primary" />
-              Carregando arquivos...
-            </div>
-          ) : filesQuery.isError ? (
-            <div className="py-6 text-center text-sm text-destructive">
-              Erro: {(filesQuery.error as Error).message}
-            </div>
-          ) : (filesQuery.data?.length ?? 0) === 0 ? (
-            <div className="py-6 text-center text-sm text-muted-foreground/60">
-              <FileSpreadsheet className="h-6 w-6 mx-auto mb-2 text-muted-foreground/20" />
-              Nenhum arquivo .parquet encontrado.
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {filesQuery.data!.map((file) => (
-                <div
-                  key={file.name}
-                  className="flex items-center gap-3 rounded-xl bg-card border border-border/30 p-3 hover:border-border/60 transition-all group/file"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/8 shrink-0">
-                    <FileSpreadsheet className="h-4 w-4 text-primary/70" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate font-mono">
-                      {file.name}
-                    </p>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      {file.metadata?.size != null && (
-                        <span className="text-[11px] text-muted-foreground">
-                          {formatFileSize(file.metadata.size)}
-                        </span>
-                      )}
-                      {file.updated_at && (
-                        <span className="text-[11px] text-muted-foreground/60">
-                          {formatDate(file.updated_at)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-lg opacity-0 group-hover/file:opacity-100 transition-all text-muted-foreground hover:text-primary hover:bg-primary/10"
-                    onClick={() => handleDownload(file.name)}
-                    title="Baixar arquivo"
-                  >
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportXLSX}
+            disabled={totalCount === 0}
+            className="rounded-xl h-9 text-xs font-medium border-border hover:bg-muted gap-1.5 shadow-sm"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            Exportar XLSX ({totalCount})
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              dreQ.refetch();
+              faturamentoQ.refetch();
+            }}
+            className="h-9 w-9 rounded-xl border border-border"
+            title="Atualizar dados"
+          >
+            <RefreshCw className={cn("h-4 w-4 text-muted-foreground", isLoading && "animate-spin")} />
+          </Button>
         </div>
-      )}
-    </Card>
+      </div>
+
+      {/* Seletor de Aba (DRE vs Faturamento) & Filtros */}
+      <Tabs
+        value={activeTab}
+        onValueChange={(val) => {
+          setActiveTab(val as "dre" | "faturamento");
+          setPage(1);
+        }}
+        className="w-full space-y-4"
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-card p-3 rounded-xl border border-border shadow-sm">
+          <TabsList className="bg-muted border border-border p-1 rounded-lg">
+            <TabsTrigger value="dre" className="text-xs font-semibold gap-2 px-4 py-1.5 rounded-md">
+              <Layers className="h-3.5 w-3.5" /> DRE Detalhado ({filteredDreData.length})
+            </TabsTrigger>
+            <TabsTrigger value="faturamento" className="text-xs font-semibold gap-2 px-4 py-1.5 rounded-md">
+              <DollarSign className="h-3.5 w-3.5" /> Faturamento por Loja ({filteredFatData.length})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Filtros Integrados */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Busca textual */}
+            <div className="relative w-full sm:w-60">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Buscar em qualquer campo..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  handleFilterChange();
+                }}
+                className="pl-8 h-8 text-xs rounded-lg bg-background border-border"
+              />
+            </div>
+
+            {/* Filtro de Ano */}
+            <Select
+              value={selectedYear}
+              onValueChange={(val) => {
+                setSelectedYear(val);
+                handleFilterChange();
+              }}
+            >
+              <SelectTrigger className="h-8 w-[100px] text-xs rounded-lg border-border bg-background">
+                <Calendar className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+                <SelectValue placeholder="Ano" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos Anos</SelectItem>
+                {availableYears.map((y) => (
+                  <SelectItem key={y} value={y}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Filtro de Matriz */}
+            <Select
+              value={selectedServidor}
+              onValueChange={(val) => {
+                setSelectedServidor(val);
+                setSelectedCidade("todas");
+                handleFilterChange();
+              }}
+            >
+              <SelectTrigger className="h-8 w-[140px] text-xs rounded-lg border-border bg-background">
+                <Building2 className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+                <SelectValue placeholder="Matriz" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todas Matrizes</SelectItem>
+                {(servidoresQ.data ?? []).map((s) => (
+                  <SelectItem key={s.servidor_id} value={String(s.servidor_id)}>
+                    {s.nome}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Filtro de Filial */}
+            <Select
+              value={selectedCidade}
+              onValueChange={(val) => {
+                setSelectedCidade(val);
+                handleFilterChange();
+              }}
+            >
+              <SelectTrigger className="h-8 w-[130px] text-xs rounded-lg border-border bg-background">
+                <MapPin className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+                <SelectValue placeholder="Filial" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todas">Todas Filiais</SelectItem>
+                {filteredSublojas.map((sub) => (
+                  <SelectItem key={sub.cidade_id} value={String(sub.cidade_id)}>
+                    {sub.nome}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* ── ABA 1: DRE DETALHADO ── */}
+        <TabsContent value="dre" className="m-0">
+          <Card className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+              <table className="w-full text-xs text-left whitespace-nowrap">
+                <thead className="sticky top-0 z-20 bg-card border-b border-border text-muted-foreground font-semibold uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">Loja</th>
+                    <th className="py-3 px-4">Cidade</th>
+                    <th className="py-3 px-4">Mês Início</th>
+                    <th className="py-3 px-4">Mês Fim</th>
+                    <th className="py-3 px-4">Código Conta</th>
+                    <th className="py-3 px-4">Descrição Conta</th>
+                    <th className="py-3 px-4">Categoria</th>
+                    <th className="py-3 px-4 text-right">Débito</th>
+                    <th className="py-3 px-4 text-right">Crédito</th>
+                    <th className="py-3 px-4 text-right">Valor Líquido</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border font-mono">
+                  {paginatedData.map((row: any) => (
+                    <tr key={row.id} className="hover:bg-muted/40 transition-colors">
+                      <td className="py-2.5 px-4 font-semibold font-sans text-foreground">{row.loja}</td>
+                      <td className="py-2.5 px-4 font-sans text-muted-foreground">{row.cidade}</td>
+                      <td className="py-2.5 px-4">{row.mes_inicio}</td>
+                      <td className="py-2.5 px-4">{row.mes_fim}</td>
+                      <td className="py-2.5 px-4 font-bold text-foreground">{row.codigo_conta || "—"}</td>
+                      <td className="py-2.5 px-4 font-sans truncate max-w-[300px]" title={row.descricao_conta}>
+                        {row.descricao_conta || "—"}
+                      </td>
+                      <td className="py-2.5 px-4 font-sans">
+                        <Badge variant="outline" className="text-[10px] py-0 font-sans border-border bg-muted">
+                          {row.categoria || "Outras Despesas"}
+                        </Badge>
+                      </td>
+                      <td className="py-2.5 px-4 text-right text-rose-600 dark:text-rose-400 font-bold">
+                        {formatMoney(Number(row.debito))}
+                      </td>
+                      <td className="py-2.5 px-4 text-right text-muted-foreground">
+                        {formatMoney(Number(row.credito))}
+                      </td>
+                      <td className="py-2.5 px-4 text-right text-foreground font-bold">
+                        {formatMoney(Number(row.valor_liquido))}
+                      </td>
+                    </tr>
+                  ))}
+                  {paginatedData.length === 0 && (
+                    <tr>
+                      <td colSpan={10} className="py-12 text-center text-muted-foreground">
+                        Nenhum registro de DRE encontrado para os filtros selecionados.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* ── ABA 2: FATURAMENTO LOJA ── */}
+        <TabsContent value="faturamento" className="m-0">
+          <Card className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+              <table className="w-full text-xs text-left whitespace-nowrap">
+                <thead className="sticky top-0 z-20 bg-card border-b border-border text-muted-foreground font-semibold uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">Loja</th>
+                    <th className="py-3 px-4">Cidade / Subloja</th>
+                    <th className="py-3 px-4">Código Loja</th>
+                    <th className="py-3 px-4">Mês Início</th>
+                    <th className="py-3 px-4">Mês Fim</th>
+                    <th className="py-3 px-4 text-right">Total Faturamento</th>
+                    <th className="py-3 px-4 text-right">Data de Cadastro</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border font-mono">
+                  {paginatedData.map((row: any) => (
+                    <tr key={row.id} className="hover:bg-muted/40 transition-colors">
+                      <td className="py-3 px-4 font-semibold font-sans text-foreground">{row.loja}</td>
+                      <td className="py-3 px-4 font-sans text-muted-foreground">{row.cidade}</td>
+                      <td className="py-3 px-4 font-bold text-foreground">{row.codigo_loja || "—"}</td>
+                      <td className="py-3 px-4">{row.mes_inicio}</td>
+                      <td className="py-3 px-4">{row.mes_fim}</td>
+                      <td className="py-3 px-4 text-right text-emerald-600 dark:text-emerald-400 font-bold text-sm">
+                        {formatMoney(Number(row.total_faturamento))}
+                      </td>
+                      <td className="py-3 px-4 text-right text-muted-foreground font-sans">
+                        {formatDateStr(row.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                  {paginatedData.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-muted-foreground">
+                        Nenhum registro de Faturamento encontrado para os filtros selecionados.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* ── BARRA DE PAGINAÇÃO NATIVA ── */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card p-3 rounded-xl border border-border shadow-sm text-xs">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <span>
+              Mostrando <strong className="text-foreground">{totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1}</strong> até{" "}
+              <strong className="text-foreground">{Math.min(currentPage * pageSize, totalCount)}</strong> de{" "}
+              <strong className="text-foreground">{totalCount}</strong> registros
+            </span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            {/* Seletor de registros por página */}
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Exibir:</span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(val) => {
+                  setPageSize(Number(val));
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-8 w-[70px] text-xs rounded-lg border-border bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                  <SelectItem value="200">200</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Controles de página */}
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="h-8 px-2.5 rounded-lg border-border"
+              >
+                <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Anterior
+              </Button>
+              <span className="px-2 font-semibold font-mono text-foreground">
+                {currentPage} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="h-8 px-2.5 rounded-lg border-border"
+              >
+                Próximo <ChevronRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Tabs>
+    </div>
   );
 }

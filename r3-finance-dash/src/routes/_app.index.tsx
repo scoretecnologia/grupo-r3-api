@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/external";
@@ -32,8 +32,6 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
@@ -49,9 +47,8 @@ export const Route = createFileRoute("/_app/")({
   component: DashboardPage,
 });
 
-// Formatadores auxiliares
 function formatMoney(value: number, showDashIfZero = false): string {
-  if (showDashIfZero && (!value || value === 0)) return "—";
+  if (showDashIfZero && (!value || Math.abs(value) < 0.01)) return "—";
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
@@ -67,20 +64,37 @@ function formatPercent(value: number): string {
   }).format(value || 0) + "%";
 }
 
+function extractMonthStr(dateStr?: string | null): string | null {
+  if (!dateStr) return null;
+  const parts = dateStr.trim().split("-");
+  if (parts.length >= 2) {
+    const m = parts[1].padStart(2, "0");
+    if (Number(m) >= 1 && Number(m) <= 12) return m;
+  }
+  return null;
+}
+
+function extractYearStr(dateStr?: string | null): string | null {
+  if (!dateStr) return null;
+  const parts = dateStr.trim().split("-");
+  if (parts.length >= 1) return parts[0];
+  return null;
+}
+
 const MONTH_KEYS = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
 const MONTH_LABELS = [
-  { key: "01", short: "Jan", full: "Janeiro" },
-  { key: "02", short: "Fev", full: "Fevereiro" },
-  { key: "03", short: "Mar", full: "Março" },
-  { key: "04", short: "Abr", full: "Abril" },
-  { key: "05", short: "Mai", full: "Maio" },
-  { key: "06", short: "Jun", full: "Junho" },
-  { key: "07", short: "Jul", full: "Julho" },
-  { key: "08", short: "Ago", full: "Agosto" },
-  { key: "09", short: "Set", full: "Setembro" },
-  { key: "10", short: "Out", full: "Outubro" },
-  { key: "11", short: "Nov", full: "Novembro" },
-  { key: "12", short: "Dez", full: "Dezembro" },
+  { key: "01", short: "JAN", full: "Janeiro" },
+  { key: "02", short: "FEV", full: "Fevereiro" },
+  { key: "03", short: "MAR", full: "Março" },
+  { key: "04", short: "ABR", full: "Abril" },
+  { key: "05", short: "MAI", full: "Maio" },
+  { key: "06", short: "JUN", full: "Junho" },
+  { key: "07", short: "JUL", full: "Julho" },
+  { key: "08", short: "AGO", full: "Agosto" },
+  { key: "09", short: "SET", full: "Setembro" },
+  { key: "10", short: "OUT", full: "Outubro" },
+  { key: "11", short: "NOV", full: "Novembro" },
+  { key: "12", short: "DEZ", full: "Dezembro" },
 ];
 
 const COLORS_PIE = ["#10b981", "#ef4444", "#3b82f6", "#f59e0b", "#8b5cf6", "#64748b"];
@@ -96,28 +110,6 @@ function normalizeCategoryName(cat?: string | null): string {
 }
 
 function DashboardPage() {
-  const currentYear = new Date().getFullYear().toString();
-
-  // Filtros Globais
-  const [selectedYear, setSelectedYear] = useState<string>("2026");
-  const [selectedMonth, setSelectedMonth] = useState<string>("08");
-  const [selectedServidor, setSelectedServidor] = useState<string>("todos");
-  const [selectedCidade, setSelectedCidade] = useState<string>("todas");
-  const [dreSearch, setDreSearch] = useState<string>("");
-
-  // Expansão de Categorias na DRE Mensal
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(["Despesas Fixas", "Despesas Variáveis"])
-  );
-
-  const toggleCategory = (cat: string) => {
-    setExpandedCategories((prev) => {
-      const next = new Set(prev);
-      next.has(cat) ? next.delete(cat) : next.add(cat);
-      return next;
-    });
-  };
-
   // Queries Supabase
   const servidoresQ = useQuery({
     queryKey: ["servidores-list"],
@@ -157,17 +149,52 @@ function DashboardPage() {
 
   const isLoading = faturamentoQ.isLoading || dreQ.isLoading;
 
+  // Anos disponíveis nos dados
+  const availableYears = useMemo(() => {
+    const setY = new Set<string>();
+    (faturamentoQ.data ?? []).forEach((item) => {
+      const y = extractYearStr(item.mes_inicio);
+      if (y) setY.add(y);
+    });
+    (dreQ.data ?? []).forEach((item) => {
+      const y = extractYearStr(item.mes_inicio);
+      if (y) setY.add(y);
+    });
+    const list = Array.from(setY).sort().reverse();
+    return list.length > 0 ? list : ["2026", "2025"];
+  }, [faturamentoQ.data, dreQ.data]);
+
+  // Filtros Globais (Ano padrão automático baseado nos dados existentes)
+  const [selectedYear, setSelectedYear] = useState<string>("2025");
+  const [selectedMonth, setSelectedMonth] = useState<string>("todos");
+  const [selectedServidor, setSelectedServidor] = useState<string>("todos");
+  const [selectedCidade, setSelectedCidade] = useState<string>("todas");
+  const [dreSearch, setDreSearch] = useState<string>("");
+
+  // Expansão de Categorias na DRE
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
+    new Set(["Despesas Fixas", "Despesas Variáveis"])
+  );
+
+  const toggleCategory = (cat: string) => {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      next.has(cat) ? next.delete(cat) : next.add(cat);
+      return next;
+    });
+  };
+
   // Filiais filtradas pela matriz selecionada
   const filteredSublojas = useMemo(() => {
     if (selectedServidor === "todos") return sublojasQ.data ?? [];
     return (sublojasQ.data ?? []).filter((s) => String(s.servidor_id) === selectedServidor);
   }, [sublojasQ.data, selectedServidor]);
 
-  // --- FILTRAGEM DE FATURAMENTO E DRE PARA O ANO SELECIONADO ---
-  const filteredFatYear = useMemo(() => {
+  // --- FILTRAGEM BASE DOS DADOS PELOS FILTROS SELECIONADOS ---
+  const filteredFatData = useMemo(() => {
     let list = faturamentoQ.data ?? [];
     if (selectedYear !== "todos") {
-      list = list.filter((item) => item.mes_inicio && item.mes_inicio.startsWith(selectedYear));
+      list = list.filter((item) => extractYearStr(item.mes_inicio) === selectedYear);
     }
     if (selectedServidor !== "todos") {
       list = list.filter((item) => String(item.id_servidor) === selectedServidor);
@@ -178,10 +205,10 @@ function DashboardPage() {
     return list;
   }, [faturamentoQ.data, selectedYear, selectedServidor, selectedCidade]);
 
-  const filteredDreYear = useMemo(() => {
+  const filteredDreData = useMemo(() => {
     let list = dreQ.data ?? [];
     if (selectedYear !== "todos") {
-      list = list.filter((item) => item.mes_inicio && item.mes_inicio.startsWith(selectedYear));
+      list = list.filter((item) => extractYearStr(item.mes_inicio) === selectedYear);
     }
     if (selectedServidor !== "todos") {
       list = list.filter((item) => String(item.id_servidor) === selectedServidor);
@@ -192,27 +219,25 @@ function DashboardPage() {
     return list;
   }, [dreQ.data, selectedYear, selectedServidor, selectedCidade]);
 
-  // --- MATRIZ DRE MENSAL (LARGURA TOTAL 12 MESES) ---
+  // --- MAPEAMENTO MATRICIAL MENSAL (12 MESES: JAN a DEZ) ---
   // 1. Faturamento por Mês
   const faturamentoMensal = useMemo(() => {
     const map: Record<string, number> = {};
     MONTH_KEYS.forEach((m) => (map[m] = 0));
-    filteredFatYear.forEach((item) => {
-      if (item.mes_inicio) {
-        const m = item.mes_inicio.substring(5, 7);
-        if (map[m] !== undefined) {
-          map[m] += Number(item.total_faturamento) || 0;
-        }
+    filteredFatData.forEach((item) => {
+      const m = extractMonthStr(item.mes_inicio);
+      if (m && map[m] !== undefined) {
+        map[m] += Number(item.total_faturamento) || 0;
       }
     });
     return map;
-  }, [filteredFatYear]);
+  }, [filteredFatData]);
 
   const faturamentoTotalAno = useMemo(() => {
     return Object.values(faturamentoMensal).reduce((a, b) => a + b, 0);
   }, [faturamentoMensal]);
 
-  // 2. Categorias e Contas por Mês
+  // 2. Despesas por Categoria e por Conta (Mês a Mês)
   const dreCategoriesMensal = useMemo(() => {
     const catMap = new Map<
       string,
@@ -224,10 +249,10 @@ function DashboardPage() {
       }
     >();
 
-    filteredDreYear.forEach((item) => {
+    filteredDreData.forEach((item) => {
       const catName = normalizeCategoryName(item.categoria);
       const accKey = item.codigo_conta || item.descricao_conta || "Outras Contas";
-      const month = item.mes_inicio ? item.mes_inicio.substring(5, 7) : "";
+      const m = extractMonthStr(item.mes_inicio);
       const debito = Number(item.debito) || 0;
 
       if (!catMap.has(catName)) {
@@ -242,8 +267,8 @@ function DashboardPage() {
       }
 
       const catObj = catMap.get(catName)!;
-      if (month && catObj.monthly[month] !== undefined) {
-        catObj.monthly[month] += debito;
+      if (m && catObj.monthly[m] !== undefined) {
+        catObj.monthly[m] += debito;
       }
       catObj.total += debito;
 
@@ -259,8 +284,8 @@ function DashboardPage() {
       }
 
       const accObj = catObj.accountsMap.get(accKey)!;
-      if (month && accObj.monthly[month] !== undefined) {
-        accObj.monthly[month] += debito;
+      if (m && accObj.monthly[m] !== undefined) {
+        accObj.monthly[m] += debito;
       }
       accObj.total += debito;
     });
@@ -282,7 +307,7 @@ function DashboardPage() {
         };
       })
       .sort((a, b) => b.total - a.total);
-  }, [filteredDreYear, dreSearch]);
+  }, [filteredDreData, dreSearch]);
 
   // Total de Despesas por Mês
   const despesasMensal = useMemo(() => {
@@ -311,7 +336,7 @@ function DashboardPage() {
 
   const resultadoTotalAno = faturamentoTotalAno - despesasTotalAno;
 
-  // --- DADOS DOS CARDS DE KPI (Mês Selecionado ou Acumulado) ---
+  // --- VALORES DOS CARDS DE KPI (Refletindo Filtro de Mês ou Acumulado) ---
   const kpiMonthKey = selectedMonth === "todos" ? null : selectedMonth;
 
   const faturamentoKpi = kpiMonthKey ? faturamentoMensal[kpiMonthKey] || 0 : faturamentoTotalAno;
@@ -339,12 +364,12 @@ function DashboardPage() {
   const topLojasData = useMemo(() => {
     const storeMap = new Map<string, { nome: string; faturamento: number; despesas: number }>();
     const monthFilterList = kpiMonthKey
-      ? filteredFatYear.filter((item) => item.mes_inicio && item.mes_inicio.substring(5, 7) === kpiMonthKey)
-      : filteredFatYear;
+      ? filteredFatData.filter((item) => extractMonthStr(item.mes_inicio) === kpiMonthKey)
+      : filteredFatData;
 
     const monthDreList = kpiMonthKey
-      ? filteredDreYear.filter((item) => item.mes_inicio && item.mes_inicio.substring(5, 7) === kpiMonthKey)
-      : filteredDreYear;
+      ? filteredDreData.filter((item) => extractMonthStr(item.mes_inicio) === kpiMonthKey)
+      : filteredDreData;
 
     monthFilterList.forEach((item) => {
       const name = item.cidade && item.cidade !== "Matriz" ? `${item.loja} - ${item.cidade}` : item.loja;
@@ -361,45 +386,48 @@ function DashboardPage() {
     return Array.from(storeMap.values())
       .sort((a, b) => b.faturamento - a.faturamento)
       .slice(0, 8);
-  }, [filteredFatYear, filteredDreYear, kpiMonthKey]);
+  }, [filteredFatData, filteredDreData, kpiMonthKey]);
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-[1700px] mx-auto animate-fade-in">
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1700px] mx-auto animate-fade-in text-foreground bg-background">
       {/* --- CABEÇALHO & FILTROS GLOBAIS --- */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-border/40">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-border">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard Financeiro & DRE Mensal</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Dashboard Financeiro & DRE</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Visão consolidada das operações, receita por faturamento e demonstrativo de resultado mês a mês.
+            Visão consolidada das operações, receita de faturamento e demonstrativo de resultado mês a mês.
           </p>
         </div>
 
-        {/* Filtros Corporativos */}
-        <div className="flex flex-wrap items-center gap-2.5 bg-card/70 p-2 rounded-xl border border-border/40 shadow-sm backdrop-blur-sm">
+        {/* Barra de Filtros Corporativos */}
+        <div className="flex flex-wrap items-center gap-2.5 bg-card p-2.5 rounded-xl border border-border shadow-sm">
           <div className="flex items-center gap-1.5 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <Filter className="h-3.5 w-3.5 text-primary" /> Filtros:
           </div>
 
           {/* Filtro de Ano */}
           <Select value={selectedYear} onValueChange={setSelectedYear}>
-            <SelectTrigger className="h-8 w-[100px] text-xs rounded-lg border-border/50">
+            <SelectTrigger className="h-8 w-[110px] text-xs rounded-lg border-border bg-background">
               <Calendar className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
               <SelectValue placeholder="Ano" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="2026">2026</SelectItem>
-              <SelectItem value="2025">2025</SelectItem>
               <SelectItem value="todos">Todos Anos</SelectItem>
+              {availableYears.map((y) => (
+                <SelectItem key={y} value={y}>
+                  {y}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
           {/* Filtro de Mês */}
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="h-8 w-[130px] text-xs rounded-lg border-border/50">
+            <SelectTrigger className="h-8 w-[130px] text-xs rounded-lg border-border bg-background">
               <SelectValue placeholder="Mês" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="todos">Ano Inteiro (Todos)</SelectItem>
+              <SelectItem value="todos">Todos os Meses</SelectItem>
               {MONTH_LABELS.map((m) => (
                 <SelectItem key={m.key} value={m.key}>
                   {m.full}
@@ -416,7 +444,7 @@ function DashboardPage() {
               setSelectedCidade("todas");
             }}
           >
-            <SelectTrigger className="h-8 w-[150px] text-xs rounded-lg border-border/50">
+            <SelectTrigger className="h-8 w-[150px] text-xs rounded-lg border-border bg-background">
               <Building2 className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
               <SelectValue placeholder="Matriz" />
             </SelectTrigger>
@@ -432,7 +460,7 @@ function DashboardPage() {
 
           {/* Filtro de Filial */}
           <Select value={selectedCidade} onValueChange={setSelectedCidade}>
-            <SelectTrigger className="h-8 w-[140px] text-xs rounded-lg border-border/50">
+            <SelectTrigger className="h-8 w-[140px] text-xs rounded-lg border-border bg-background">
               <MapPin className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
               <SelectValue placeholder="Filial" />
             </SelectTrigger>
@@ -462,71 +490,71 @@ function DashboardPage() {
         </div>
       </div>
 
-      {/* --- CARDS DE KPI (Indicadores de Topo) --- */}
+      {/* --- CARDS DE KPI --- */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Faturamento */}
-        <Card className="p-4 rounded-xl border-border/40 bg-card/80 backdrop-blur-sm relative overflow-hidden">
+        <Card className="p-4 rounded-xl border border-border bg-card shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Faturamento Bruto ({kpiMonthKey ? MONTH_LABELS.find((m) => m.key === kpiMonthKey)?.full : "Acumulado Ano"})
+              Faturamento Bruto ({kpiMonthKey ? MONTH_LABELS.find((m) => m.key === kpiMonthKey)?.full : "Acumulado"})
             </span>
             <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <DollarSign className="h-4 w-4 text-emerald-500" />
+              <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
             </div>
           </div>
-          <div className="text-2xl font-bold mt-2 font-mono">{formatMoney(faturamentoKpi)}</div>
+          <div className="text-2xl font-bold mt-2 font-mono text-foreground">{formatMoney(faturamentoKpi)}</div>
           <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
-            <span className="text-emerald-500 font-medium">100%</span> receita consolidada
+            <span className="text-emerald-600 dark:text-emerald-400 font-medium">100%</span> receita consolidada
           </p>
         </Card>
 
         {/* Despesas */}
-        <Card className="p-4 rounded-xl border-border/40 bg-card/80 backdrop-blur-sm relative overflow-hidden">
+        <Card className="p-4 rounded-xl border border-border bg-card shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Despesas Operacionais
             </span>
             <div className="h-8 w-8 rounded-lg bg-rose-500/10 flex items-center justify-center">
-              <TrendingDown className="h-4 w-4 text-rose-500" />
+              <TrendingDown className="h-4 w-4 text-rose-600 dark:text-rose-400" />
             </div>
           </div>
-          <div className="text-2xl font-bold mt-2 font-mono text-rose-400">{formatMoney(despesasKpi)}</div>
+          <div className="text-2xl font-bold mt-2 font-mono text-rose-600 dark:text-rose-400">{formatMoney(despesasKpi)}</div>
           <p className="text-[11px] text-muted-foreground mt-1 font-mono">
             {faturamentoKpi > 0 ? ((despesasKpi / faturamentoKpi) * 100).toFixed(1) : 0}% do faturamento
           </p>
         </Card>
 
         {/* Resultado Líquido */}
-        <Card className="p-4 rounded-xl border-border/40 bg-card/80 backdrop-blur-sm relative overflow-hidden">
+        <Card className="p-4 rounded-xl border border-border bg-card shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Resultado Líquido
             </span>
             <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center", resultadoKpi >= 0 ? "bg-emerald-500/10" : "bg-rose-500/10")}>
-              {resultadoKpi >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-500" /> : <TrendingDown className="h-4 w-4 text-rose-500" />}
+              {resultadoKpi >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> : <TrendingDown className="h-4 w-4 text-rose-600 dark:text-rose-400" />}
             </div>
           </div>
-          <div className={cn("text-2xl font-bold mt-2 font-mono", resultadoKpi >= 0 ? "text-emerald-400" : "text-rose-400")}>
+          <div className={cn("text-2xl font-bold mt-2 font-mono", resultadoKpi >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
             {formatMoney(resultadoKpi)}
           </div>
           <p className="text-[11px] text-muted-foreground mt-1">
-            <Badge variant="outline" className={cn("text-[10px] py-0 border-0 font-mono", resultadoKpi >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
+            <Badge variant="outline" className={cn("text-[10px] py-0 border-0 font-mono", resultadoKpi >= 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-rose-500/10 text-rose-600 dark:text-rose-400")}>
               {resultadoKpi >= 0 ? "Lucro Operacional" : "Prejuízo Operacional"}
             </Badge>
           </p>
         </Card>
 
         {/* Margem (%) */}
-        <Card className="p-4 rounded-xl border-border/40 bg-card/80 backdrop-blur-sm relative overflow-hidden">
+        <Card className="p-4 rounded-xl border border-border bg-card shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Margem Operacional
             </span>
             <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <Percent className="h-4 w-4 text-blue-500" />
+              <Percent className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             </div>
           </div>
-          <div className="text-2xl font-bold mt-2 font-mono">{formatPercent(margemKpi)}</div>
+          <div className="text-2xl font-bold mt-2 font-mono text-foreground">{formatPercent(margemKpi)}</div>
           <p className="text-[11px] text-muted-foreground mt-1 font-mono">
             Eficiência financeira no período
           </p>
@@ -534,37 +562,37 @@ function DashboardPage() {
       </div>
 
       {/* ============================================================================== */}
-      {/* 📄 DEMONSTRATIVO DE RESULTADO (DRE MENSAL EM LARGURA TOTAL - FULL WIDTH)     */}
+      {/* 📄 DEMONSTRATIVO DE RESULTADO (ALTURA FIXA COM SCROLL INTERNO - FULL WIDTH)   */}
       {/* ============================================================================== */}
-      <Card className="p-5 rounded-xl border-border/40 bg-card/70 backdrop-blur-sm w-full space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-border/40">
+      <Card className="p-5 rounded-xl border border-border bg-card shadow-sm w-full space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-border">
           <div>
-            <h2 className="text-base font-bold flex items-center gap-2">
-              <Layers className="h-4.5 w-4.5 text-primary" /> Demonstrativo de Resultado por Mês ({selectedYear === "todos" ? currentYear : selectedYear})
+            <h2 className="text-base font-bold flex items-center gap-2 text-foreground">
+              <Layers className="h-4.5 w-4.5 text-primary" /> Demonstrativo de Resultado por Mês ({selectedYear === "todos" ? "Todos os Anos" : selectedYear})
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Valores mensais de Faturamento Bruto, Despesas por Categoria e Resultado Líquido. Clique na categoria para expandir as contas contábeis.
+              Valores mensais de Faturamento, Despesas por Categoria e Resultado Líquido. Clique na categoria para expandir as contas contábeis.
             </p>
           </div>
 
           {/* Busca por conta contábil */}
           <div className="relative w-full sm:w-64">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               placeholder="Buscar conta ou código..."
               value={dreSearch}
               onChange={(e) => setDreSearch(e.target.value)}
-              className="pl-8 h-8 text-xs rounded-lg bg-background border-border/50"
+              className="pl-8 h-8 text-xs rounded-lg bg-background border-border"
             />
           </div>
         </div>
 
-        {/* Tabela Matricial DRE Full-Width com Colunas dos 12 Meses */}
-        <div className="overflow-x-auto relative rounded-lg border border-border/40">
-          <table className="w-full text-xs text-left whitespace-nowrap">
-            <thead>
-              <tr className="border-b border-border/50 text-muted-foreground font-semibold uppercase tracking-wider bg-muted/40">
-                <th className="py-3 px-4 min-w-[280px] sticky left-0 bg-[#0c1a12] z-20 shadow-md">
+        {/* Tabela DRE com ALTURA FIXA (max-h-[520px]) e Scroll Interno Vertical + Horizontal */}
+        <div className="max-h-[520px] overflow-y-auto overflow-x-auto rounded-lg border border-border bg-background relative shadow-inner">
+          <table className="w-full text-xs text-left whitespace-nowrap border-collapse">
+            <thead className="sticky top-0 z-30 bg-card border-b border-border shadow-sm">
+              <tr className="text-muted-foreground font-semibold uppercase tracking-wider">
+                <th className="py-3 px-4 min-w-[280px] max-w-[280px] sticky left-0 bg-card z-40 border-r border-border shadow-md text-left">
                   Categoria / Conta Contábil
                 </th>
                 {MONTH_LABELS.map((m) => (
@@ -572,25 +600,27 @@ function DashboardPage() {
                     {m.short}
                   </th>
                 ))}
-                <th className="py-3 px-4 text-right min-w-[125px] font-bold text-foreground bg-muted/60">
+                <th className="py-3 px-4 text-right min-w-[125px] font-bold text-foreground bg-muted/50 border-l border-border">
                   Total Ano
                 </th>
               </tr>
             </thead>
 
-            <tbody className="divide-y divide-border/30 font-mono">
+            <tbody className="divide-y divide-border font-mono">
               {/* ── 1. FATURAMENTO BRUTO ── */}
               <tr className="bg-emerald-500/10 font-bold text-xs hover:bg-emerald-500/15 transition-colors">
-                <td className="py-3 px-4 font-sans text-emerald-400 flex items-center gap-2 sticky left-0 bg-[#0c1a12] z-10 shadow-md">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                  FATURAMENTO BRUTO
+                <td className="py-3 px-4 font-sans text-emerald-700 dark:text-emerald-400 min-w-[280px] max-w-[280px] sticky left-0 bg-card z-20 border-r border-border shadow-md">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                    FATURAMENTO BRUTO
+                  </div>
                 </td>
                 {MONTH_KEYS.map((m) => (
-                  <td key={m} className="py-3 px-3 text-right text-emerald-400">
+                  <td key={m} className="py-3 px-3 text-right text-emerald-700 dark:text-emerald-400">
                     {formatMoney(faturamentoMensal[m], true)}
                   </td>
                 ))}
-                <td className="py-3 px-4 text-right text-emerald-400 text-sm font-bold bg-emerald-500/10">
+                <td className="py-3 px-4 text-right text-emerald-700 dark:text-emerald-400 text-sm font-bold bg-emerald-500/10 border-l border-border">
                   {formatMoney(faturamentoTotalAno)}
                 </td>
               </tr>
@@ -599,29 +629,31 @@ function DashboardPage() {
               {dreCategoriesMensal.map((catGroup) => {
                 const isExpanded = expandedCategories.has(catGroup.category);
                 return (
-                  <tbody key={catGroup.category} className="divide-y divide-border/20">
+                  <Fragment key={catGroup.category}>
                     {/* Linha da Categoria (Nível 1) */}
                     <tr
                       onClick={() => toggleCategory(catGroup.category)}
-                      className="hover:bg-muted/40 cursor-pointer transition-colors font-semibold bg-card/40"
+                      className="hover:bg-muted/60 cursor-pointer transition-colors font-semibold bg-card/60"
                     >
-                      <td className="py-2.5 px-4 font-sans flex items-center gap-2 sticky left-0 bg-[#0c1a12] z-10 shadow-md">
-                        {isExpanded ? (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        )}
-                        <span className="font-bold">{catGroup.category}</span>
-                        <Badge variant="secondary" className="text-[10px] py-0 px-1.5 rounded-md font-mono bg-muted/80 border-0 ml-1">
-                          {catGroup.accounts.length}
-                        </Badge>
+                      <td className="py-2.5 px-4 font-sans min-w-[280px] max-w-[280px] sticky left-0 bg-card z-20 border-r border-border shadow-md text-foreground">
+                        <div className="flex items-center gap-2">
+                          {isExpanded ? (
+                            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          )}
+                          <span className="font-bold truncate">{catGroup.category}</span>
+                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5 rounded-md font-mono bg-muted border-0 ml-1 shrink-0">
+                            {catGroup.accounts.length}
+                          </Badge>
+                        </div>
                       </td>
                       {MONTH_KEYS.map((m) => (
-                        <td key={m} className="py-2.5 px-3 text-right text-rose-400/90 font-mono">
+                        <td key={m} className="py-2.5 px-3 text-right text-rose-600 dark:text-rose-400 font-mono">
                           {formatMoney(catGroup.monthly[m], true)}
                         </td>
                       ))}
-                      <td className="py-2.5 px-4 text-right text-rose-400 font-bold font-mono bg-muted/30">
+                      <td className="py-2.5 px-4 text-right text-rose-600 dark:text-rose-400 font-bold font-mono bg-muted/40 border-l border-border">
                         {formatMoney(catGroup.total)}
                       </td>
                     </tr>
@@ -629,9 +661,9 @@ function DashboardPage() {
                     {/* Linhas das Contas Contábeis (Nível 2 - Detalhamento) */}
                     {isExpanded &&
                       catGroup.accounts.map((acc) => (
-                        <tr key={acc.code || acc.desc} className="bg-muted/15 hover:bg-muted/30 text-[11px] text-muted-foreground">
-                          <td className="py-2 px-4 pl-9 font-sans truncate max-w-[280px] sticky left-0 bg-[#0e1f16] z-10 shadow-md" title={acc.desc}>
-                            <span className="font-mono text-muted-foreground/60 mr-2">{acc.code || "—"}</span>
+                        <tr key={acc.code || acc.desc} className="bg-muted/20 hover:bg-muted/40 text-[11px] text-muted-foreground">
+                          <td className="py-2 px-4 pl-9 font-sans truncate min-w-[280px] max-w-[280px] sticky left-0 bg-card z-20 border-r border-border shadow-md" title={acc.desc}>
+                            <span className="font-mono text-muted-foreground/70 mr-2">{acc.code || "—"}</span>
                             {acc.desc}
                           </td>
                           {MONTH_KEYS.map((m) => (
@@ -639,18 +671,18 @@ function DashboardPage() {
                               {formatMoney(acc.monthly[m], true)}
                             </td>
                           ))}
-                          <td className="py-2 px-4 text-right font-mono font-medium text-foreground/80 bg-muted/20">
+                          <td className="py-2 px-4 text-right font-mono font-medium text-foreground bg-muted/30 border-l border-border">
                             {formatMoney(acc.total)}
                           </td>
                         </tr>
                       ))}
-                  </tbody>
+                  </Fragment>
                 );
               })}
 
               {/* ── 3. TOTAL DE DESPESAS ── */}
-              <tr className="bg-rose-500/10 font-bold text-xs text-rose-400">
-                <td className="py-3 px-4 font-sans uppercase tracking-wider sticky left-0 bg-[#0c1a12] z-10 shadow-md">
+              <tr className="bg-rose-500/10 font-bold text-xs text-rose-600 dark:text-rose-400">
+                <td className="py-3 px-4 font-sans uppercase tracking-wider min-w-[280px] max-w-[280px] sticky left-0 bg-card z-20 border-r border-border shadow-md">
                   TOTAL DE DESPESAS
                 </td>
                 {MONTH_KEYS.map((m) => (
@@ -658,25 +690,27 @@ function DashboardPage() {
                     {formatMoney(despesasMensal[m], true)}
                   </td>
                 ))}
-                <td className="py-3 px-4 text-right font-mono text-sm font-bold bg-rose-500/10">
+                <td className="py-3 px-4 text-right font-mono text-sm font-bold bg-rose-500/10 border-l border-border">
                   {formatMoney(despesasTotalAno)}
                 </td>
               </tr>
 
               {/* ── 4. RESULTADO LÍQUIDO (Faturamento - Despesas) ── */}
-              <tr className={cn("font-bold text-sm border-t-2 border-border/80", resultadoTotalAno >= 0 ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/15 text-rose-400")}>
-                <td className="py-3.5 px-4 font-sans flex items-center gap-2 sticky left-0 bg-[#0c1a12] z-10 shadow-md">
-                  (=) RESULTADO LÍQUIDO (LUCRO / PREJUÍZO)
+              <tr className={cn("font-bold text-sm border-t-2 border-border", resultadoTotalAno >= 0 ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-rose-500/15 text-rose-700 dark:text-rose-400")}>
+                <td className="py-3.5 px-4 font-sans min-w-[280px] max-w-[280px] sticky left-0 bg-card z-20 border-r border-border shadow-md">
+                  <div className="flex items-center gap-2">
+                    (=) RESULTADO LÍQUIDO
+                  </div>
                 </td>
                 {MONTH_KEYS.map((m) => {
                   const res = resultadoMensal[m];
                   return (
-                    <td key={m} className={cn("py-3.5 px-3 text-right font-mono", res >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                    <td key={m} className={cn("py-3.5 px-3 text-right font-mono", res >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>
                       {formatMoney(res, true)}
                     </td>
                   );
                 })}
-                <td className={cn("py-3.5 px-4 text-right font-mono text-base font-bold bg-muted/40", resultadoTotalAno >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                <td className={cn("py-3.5 px-4 text-right font-mono text-base font-bold bg-muted/50 border-l border-border", resultadoTotalAno >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>
                   {formatMoney(resultadoTotalAno)}
                 </td>
               </tr>
@@ -688,7 +722,7 @@ function DashboardPage() {
       {/* --- SEÇÃO DE GRÁFICOS VISUAIS E RANKING POR LOJA --- */}
       <div className="grid gap-6 lg:grid-cols-12">
         {/* GRÁFICO 1: EVOLUÇÃO MENSAL (7 Colunas) */}
-        <Card className="lg:col-span-7 p-5 rounded-xl border-border/40 bg-card/70 backdrop-blur-sm">
+        <Card className="lg:col-span-7 p-5 rounded-xl border border-border bg-card shadow-sm">
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-4">
             Evolução Mensal (Faturamento vs Despesas)
           </h3>
@@ -705,11 +739,11 @@ function DashboardPage() {
                     <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
-                <XAxis dataKey="label" stroke="#888888" fontSize={11} tickLine={false} />
-                <YAxis stroke="#888888" fontSize={11} tickLine={false} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
+                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} vertical={false} />
+                <XAxis dataKey="label" stroke="currentColor" opacity={0.5} fontSize={11} tickLine={false} />
+                <YAxis stroke="currentColor" opacity={0.5} fontSize={11} tickLine={false} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: "#0c1a12", borderColor: "#ffffff20", borderRadius: "8px", fontSize: "11px" }}
+                  contentStyle={{ backgroundColor: "var(--card)", borderColor: "var(--border)", color: "var(--card-foreground)", borderRadius: "8px", fontSize: "11px" }}
                   formatter={(val: number) => [formatMoney(val), ""]}
                 />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: "11px", paddingTop: "10px" }} />
@@ -721,7 +755,7 @@ function DashboardPage() {
         </Card>
 
         {/* GRÁFICO 2: DISTRIBUIÇÃO POR CATEGORIA (5 Colunas) */}
-        <Card className="lg:col-span-5 p-5 rounded-xl border-border/40 bg-card/70 backdrop-blur-sm">
+        <Card className="lg:col-span-5 p-5 rounded-xl border border-border bg-card shadow-sm">
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-4">
             Proporção de Despesas por Categoria
           </h3>
@@ -735,7 +769,7 @@ function DashboardPage() {
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ backgroundColor: "#0c1a12", borderColor: "#ffffff20", borderRadius: "8px", fontSize: "11px" }}
+                    contentStyle={{ backgroundColor: "var(--card)", borderColor: "var(--border)", color: "var(--card-foreground)", borderRadius: "8px", fontSize: "11px" }}
                     formatter={(val: number) => [formatMoney(val), "Despesa"]}
                   />
                   <Legend iconType="circle" layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{ fontSize: "11px", paddingLeft: "10px" }} />
@@ -749,10 +783,10 @@ function DashboardPage() {
       </div>
 
       {/* --- DESEMPENHO POR UNIDADE / LOJA --- */}
-      <Card className="p-5 rounded-xl border-border/40 bg-card/70 backdrop-blur-sm">
+      <Card className="p-5 rounded-xl border border-border bg-card shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-bold flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-primary" /> Desempenho por Loja / Filial ({kpiMonthKey ? MONTH_LABELS.find((m) => m.key === kpiMonthKey)?.full : "Acumulado Ano"})
+          <h3 className="text-sm font-bold flex items-center gap-2 text-foreground">
+            <Building2 className="h-4 w-4 text-primary" /> Desempenho por Loja / Filial ({kpiMonthKey ? MONTH_LABELS.find((m) => m.key === kpiMonthKey)?.full : "Acumulado"})
           </h3>
           <Badge variant="secondary" className="text-[10px] font-mono">
             {topLojasData.length} unidades ativas
@@ -762,7 +796,7 @@ function DashboardPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
-              <tr className="border-b border-border/40 text-muted-foreground font-semibold uppercase tracking-wider bg-muted/20">
+              <tr className="border-b border-border text-muted-foreground font-semibold uppercase tracking-wider bg-muted/40">
                 <th className="py-2.5 px-3">Unidade / Loja</th>
                 <th className="py-2.5 px-3 text-right">Faturamento Bruto</th>
                 <th className="py-2.5 px-3 text-right">Despesas Operacionais</th>
@@ -770,20 +804,20 @@ function DashboardPage() {
                 <th className="py-2.5 px-3 text-right">Margem (%)</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border/30 font-mono">
+            <tbody className="divide-y divide-border font-mono">
               {topLojasData.map((store) => {
                 const res = store.faturamento - store.despesas;
                 const margem = store.faturamento > 0 ? (res / store.faturamento) * 100 : 0;
                 return (
                   <tr key={store.nome} className="hover:bg-muted/30 transition-colors">
-                    <td className="py-2.5 px-3 font-semibold font-sans">{store.nome}</td>
-                    <td className="py-2.5 px-3 text-right text-emerald-400">{formatMoney(store.faturamento)}</td>
-                    <td className="py-2.5 px-3 text-right text-rose-400">{formatMoney(store.despesas)}</td>
-                    <td className={cn("py-2.5 px-3 text-right font-bold", res >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                    <td className="py-2.5 px-3 font-semibold font-sans text-foreground">{store.nome}</td>
+                    <td className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400">{formatMoney(store.faturamento)}</td>
+                    <td className="py-2.5 px-3 text-right text-rose-600 dark:text-rose-400">{formatMoney(store.despesas)}</td>
+                    <td className={cn("py-2.5 px-3 text-right font-bold", res >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
                       {formatMoney(res)}
                     </td>
                     <td className="py-2.5 px-3 text-right">
-                      <Badge variant="outline" className={cn("text-[10px] py-0 font-mono border-0", res >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
+                      <Badge variant="outline" className={cn("text-[10px] py-0 font-mono border-0", res >= 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-rose-500/10 text-rose-600 dark:text-rose-400")}>
                         {formatPercent(margem)}
                       </Badge>
                     </td>
