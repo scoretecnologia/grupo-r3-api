@@ -258,7 +258,9 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
 
     col_codigo = next((c for c in ['planoCodigo', 'codigoConta', 'codigo', 'conta'] if c in df.columns), None)
     col_desc = next((c for c in ['planoDescricao', 'descricaoConta', 'descricao', 'contaDescricao'] if c in df.columns), None)
-    known_cols = {'id_servidor', 'loja', 'id_cidade', 'cidade', 'debito', 'credito', 'valorLiquido', 'codigoConta', 'descricaoConta', 'codigo', 'descricao', 'planoCodigo', 'planoDescricao', 'conta', 'contaDescricao'}
+    col_cat = next((c for c in ['categoriaPlanoContas', 'categoria', 'categoriaConta'] if c in df.columns), None)
+
+    known_cols = {'id_servidor', 'loja', 'id_cidade', 'cidade', 'debito', 'credito', 'valorLiquido', 'codigoConta', 'descricaoConta', 'codigo', 'descricao', 'planoCodigo', 'planoDescricao', 'conta', 'contaDescricao', 'categoriaPlanoContas', 'categoria', 'categoriaConta'}
 
     registros = []
     for _, row in df.iterrows():
@@ -273,6 +275,7 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
             "mes_fim": str(mes_fim),
             "codigo_conta": str(row[col_codigo]) if (col_codigo and not pd.isna(row[col_codigo])) else None,
             "descricao_conta": str(row[col_desc]) if (col_desc and not pd.isna(row[col_desc])) else None,
+            "categoria": str(row[col_cat]) if (col_cat and not pd.isna(row[col_cat])) else "Outras Despesas",
             "debito": float(row.get("debito", 0.0)) if not pd.isna(row.get("debito")) else 0.0,
             "credito": float(row.get("credito", 0.0)) if not pd.isna(row.get("credito")) else 0.0,
             "valor_liquido": float(row.get("valorLiquido", 0.0)) if not pd.isna(row.get("valorLiquido")) else 0.0,

@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS public.grupo_r3_dre_detalhado (
     mes_fim DATE NOT NULL,
     codigo_conta TEXT,
     descricao_conta TEXT,
+    categoria TEXT,
     debito NUMERIC(15, 2) DEFAULT 0.00,
     credito NUMERIC(15, 2) DEFAULT 0.00,
     valor_liquido NUMERIC(15, 2) DEFAULT 0.00,
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS public.grupo_r3_dre_detalhado (
 CREATE INDEX IF NOT EXISTS idx_dre_servidor_cidade ON public.grupo_r3_dre_detalhado (id_servidor, id_cidade);
 CREATE INDEX IF NOT EXISTS idx_dre_periodo ON public.grupo_r3_dre_detalhado (mes_inicio, mes_fim);
 CREATE INDEX IF NOT EXISTS idx_dre_codigo_conta ON public.grupo_r3_dre_detalhado (codigo_conta);
+CREATE INDEX IF NOT EXISTS idx_dre_categoria ON public.grupo_r3_dre_detalhado (categoria);
 
 -- ------------------------------------------------------------------------------
 -- 5. Tabela de Faturamento por Loja
