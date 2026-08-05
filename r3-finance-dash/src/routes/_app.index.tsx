@@ -2,6 +2,7 @@ import { useState, useMemo, Fragment } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/external";
+import * as XLSX from "xlsx";
 import {
   DollarSign,
   TrendingUp,
@@ -16,6 +17,10 @@ import {
   Calendar,
   Layers,
   Search,
+  FileSpreadsheet,
+  FileText,
+  Info,
+  ExternalLink,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +33,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -81,6 +93,18 @@ function extractYearStr(dateStr?: string | null): string | null {
   return null;
 }
 
+function formatDateDisplay(dateStr?: string | null): string {
+  if (!dateStr) return "—";
+  try {
+    const clean = dateStr.split("T")[0];
+    const parts = clean.split("-");
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    return dateStr;
+  } catch {
+    return dateStr;
+  }
+}
+
 const MONTH_KEYS = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
 const MONTH_LABELS = [
   { key: "01", short: "JAN", full: "Janeiro" },
@@ -107,6 +131,16 @@ function normalizeCategoryName(cat?: string | null): string {
   if (lower.includes("não operacional") || lower.includes("nao operacional")) return "Despesas Não Operacionais";
   if (lower.includes("invest")) return "Investimentos";
   return cat.trim();
+}
+
+interface CellDetailState {
+  accountCode: string;
+  accountDesc: string;
+  category: string;
+  monthKey: string;
+  monthLabel: string;
+  year: string;
+  records: any[];
 }
 
 function DashboardPage() {
@@ -164,7 +198,7 @@ function DashboardPage() {
     return list.length > 0 ? list : ["2026", "2025"];
   }, [faturamentoQ.data, dreQ.data]);
 
-  // Filtros Globais (Ano padrão automático baseado nos dados existentes)
+  // Filtros Globais
   const [selectedYear, setSelectedYear] = useState<string>("2025");
   const [selectedMonth, setSelectedMonth] = useState<string>("todos");
   const [selectedServidor, setSelectedServidor] = useState<string>("todos");
@@ -175,6 +209,10 @@ function DashboardPage() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set(["Despesas Fixas", "Despesas Variáveis"])
   );
+
+  // Estado do Modal de Detalhamento da Célula DRE
+  const [selectedCellDetail, setSelectedCellDetail] = useState<CellDetailState | null>(null);
+  const [expandedRawRowId, setExpandedRawRowId] = useState<number | null>(null);
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories((prev) => {
@@ -336,7 +374,7 @@ function DashboardPage() {
 
   const resultadoTotalAno = faturamentoTotalAno - despesasTotalAno;
 
-  // --- VALORES DOS CARDS DE KPI (Refletindo Filtro de Mês ou Acumulado) ---
+  // --- VALORES DOS CARDS DE KPI ---
   const kpiMonthKey = selectedMonth === "todos" ? null : selectedMonth;
 
   const faturamentoKpi = kpiMonthKey ? faturamentoMensal[kpiMonthKey] || 0 : faturamentoTotalAno;
@@ -387,6 +425,30 @@ function DashboardPage() {
       .sort((a, b) => b.faturamento - a.faturamento)
       .slice(0, 8);
   }, [filteredFatData, filteredDreData, kpiMonthKey]);
+
+  // Handler para abrir o modal de detalhamento ao clicar no valor de um mês de uma conta contábil
+  const handleCellClick = (accCode: string, accDesc: string, category: string, monthKey: string) => {
+    const monthLabel = MONTH_LABELS.find((m) => m.key === monthKey)?.full || monthKey;
+    const yearLabel = selectedYear === "todos" ? "Todos os Anos" : selectedYear;
+
+    // Buscar lançamentos correspondentes
+    const records = filteredDreData.filter((item) => {
+      const matchAcc = (item.codigo_conta && item.codigo_conta === accCode) || (item.descricao_conta && item.descricao_conta === accDesc);
+      const matchMonth = extractMonthStr(item.mes_inicio) === monthKey;
+      return matchAcc && matchMonth;
+    });
+
+    setSelectedCellDetail({
+      accountCode: accCode,
+      accountDesc: accDesc,
+      category: category,
+      monthKey: monthKey,
+      monthLabel: monthLabel,
+      year: yearLabel,
+      records: records,
+    });
+    setExpandedRawRowId(null);
+  };
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-[1700px] mx-auto animate-fade-in text-foreground bg-background">
@@ -571,7 +633,7 @@ function DashboardPage() {
               <Layers className="h-4.5 w-4.5 text-primary" /> Demonstrativo de Resultado por Mês ({selectedYear === "todos" ? "Todos os Anos" : selectedYear})
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Valores mensais de Faturamento, Despesas por Categoria e Resultado Líquido. Clique na categoria para expandir as contas contábeis.
+              Valores mensais de Faturamento, Despesas por Categoria e Resultado Líquido. Clique no valor da conta para ver os detalhes do lançamento.
             </p>
           </div>
 
@@ -666,11 +728,27 @@ function DashboardPage() {
                             <span className="font-mono text-muted-foreground/70 mr-2">{acc.code || "—"}</span>
                             {acc.desc}
                           </td>
-                          {MONTH_KEYS.map((m) => (
-                            <td key={m} className="py-2 px-3 text-right font-mono">
-                              {formatMoney(acc.monthly[m], true)}
-                            </td>
-                          ))}
+                          {MONTH_KEYS.map((m) => {
+                            const val = acc.monthly[m];
+                            const hasVal = val && Math.abs(val) > 0.01;
+                            return (
+                              <td
+                                key={m}
+                                onClick={() => {
+                                  if (hasVal) handleCellClick(acc.code, acc.desc, catGroup.category, m);
+                                }}
+                                className={cn(
+                                  "py-2 px-3 text-right font-mono transition-colors",
+                                  hasVal
+                                    ? "cursor-pointer hover:bg-primary/20 hover:text-primary underline decoration-dotted font-semibold"
+                                    : "text-muted-foreground/50"
+                                )}
+                                title={hasVal ? "Clique para ver o detalhamento dos lançamentos no modal" : undefined}
+                              >
+                                {formatMoney(val, true)}
+                              </td>
+                            );
+                          })}
                           <td className="py-2 px-4 text-right font-mono font-medium text-foreground bg-muted/30 border-l border-border">
                             {formatMoney(acc.total)}
                           </td>
@@ -835,6 +913,192 @@ function DashboardPage() {
           </table>
         </div>
       </Card>
+
+      {/* ============================================================================== */}
+      {/* 🔍 MODAL DE DETALHAMENTO DA CÉLULA DA DRE (COM DADOS_EXTRA)                  */}
+      {/* ============================================================================== */}
+      <Dialog
+        open={!!selectedCellDetail}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedCellDetail(null);
+            setExpandedRawRowId(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl w-full max-h-[85vh] overflow-y-auto p-6 rounded-2xl border border-border bg-card shadow-2xl">
+          <DialogHeader className="pb-4 border-b border-border">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <DialogTitle className="text-lg font-bold text-foreground flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-primary" /> Detalhamento de Lançamentos
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground mt-1">
+                  Conta: <strong className="text-foreground">{selectedCellDetail?.accountCode} — {selectedCellDetail?.accountDesc}</strong> | Mês: <strong className="text-foreground">{selectedCellDetail?.monthLabel} ({selectedCellDetail?.year})</strong>
+                </DialogDescription>
+              </div>
+              {selectedCellDetail && selectedCellDetail.records.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const exportRows = selectedCellDetail.records.map((r) => ({
+                      ID: r.id,
+                      Loja: r.loja,
+                      Cidade: r.cidade,
+                      "Mês Referência": r.mes_inicio,
+                      "Código Conta": r.codigo_conta,
+                      "Descrição Conta": r.descricao_conta,
+                      Débito: Number(r.debito) || 0,
+                      Crédito: Number(r.credito) || 0,
+                      Documento: r.dados_extra?.documento || r.dados_extra?.docto || "",
+                      Histórico: r.dados_extra?.historico || "",
+                      "Conta Origem": r.dados_extra?.conta || "",
+                      Empresa: r.dados_extra?.empresa || "",
+                      Data: formatDateDisplay(r.dados_extra?.data),
+                    }));
+                    XLSX.utils.book_append_sheet(
+                      XLSX.utils.book_new(),
+                      XLSX.utils.json_to_sheet(exportRows),
+                      "Detalhamento"
+                    );
+                    exportToXLSX(
+                      exportRows,
+                      `Detalhamento_${selectedCellDetail.accountCode}_${selectedCellDetail.monthLabel}`
+                    );
+                  }}
+                  className="h-8 text-xs gap-1.5 rounded-lg border-border"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> Exportar XLSX
+                </Button>
+              )}
+            </div>
+          </DialogHeader>
+
+          {/* Resumo no topo do Modal */}
+          {selectedCellDetail && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 my-2">
+              <div className="bg-muted/40 p-3 rounded-xl border border-border">
+                <span className="text-[10px] uppercase font-semibold text-muted-foreground">Total de Registros</span>
+                <div className="text-lg font-bold font-mono text-foreground">{selectedCellDetail.records.length} lançamentos</div>
+              </div>
+              <div className="bg-muted/40 p-3 rounded-xl border border-border">
+                <span className="text-[10px] uppercase font-semibold text-muted-foreground">Valor Total Débito</span>
+                <div className="text-lg font-bold font-mono text-rose-600 dark:text-rose-400">
+                  {formatMoney(selectedCellDetail.records.reduce((acc, curr) => acc + (Number(curr.debito) || 0), 0))}
+                </div>
+              </div>
+              <div className="bg-muted/40 p-3 rounded-xl border border-border">
+                <span className="text-[10px] uppercase font-semibold text-muted-foreground">Categoria</span>
+                <div className="text-sm font-bold text-foreground truncate">{selectedCellDetail.category}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Tabela de Lançamentos Enxuta (Sem scroll horizontal) */}
+          <div className="mt-2 rounded-xl border border-border bg-background overflow-hidden">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-muted/60 text-muted-foreground font-semibold uppercase tracking-wider border-b border-border">
+                <tr>
+                  <th className="py-2.5 px-3">Data</th>
+                  <th className="py-2.5 px-3">Loja / Cidade</th>
+                  <th className="py-2.5 px-3 text-right">Valor Débito</th>
+                  <th className="py-2.5 px-3 text-center">Metadados</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border font-mono">
+                {selectedCellDetail?.records.map((r) => {
+                  const isRowExpanded = expandedRawRowId === r.id;
+                  const extra = r.dados_extra || {};
+                  
+                  const ignoredKeys = new Set([
+                    "tipoformatado",
+                    "data",
+                    "tipo",
+                    "conta",
+                    "sequencia",
+                    "codcentrocusto",
+                    "desccentrocusto",
+                    "categoriaplanocontas",
+                  ]);
+
+                  const filteredExtraEntries = Object.entries(extra).filter(
+                    ([k]) => !ignoredKeys.has(k.toLowerCase())
+                  );
+
+                  return (
+                    <Fragment key={r.id}>
+                      <tr className="hover:bg-muted/30 transition-colors">
+                        <td className="py-2.5 px-3 font-sans text-foreground">
+                          {formatDateDisplay(extra.data || r.mes_inicio)}
+                        </td>
+                        <td className="py-2.5 px-3 font-sans font-semibold text-foreground">
+                          {r.loja} <span className="text-muted-foreground font-normal">({r.cidade})</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-rose-600 dark:text-rose-400 font-mono">
+                          {formatMoney(Number(r.debito))}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-sans">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setExpandedRawRowId(isRowExpanded ? null : r.id)}
+                            className="h-6 px-2 text-[10px] rounded-md gap-1"
+                          >
+                            <Info className="h-3 w-3 text-primary" />
+                            {isRowExpanded ? "Ocultar" : "Ver Metadados"}
+                          </Button>
+                        </td>
+                      </tr>
+
+                      {/* Linha expandida com os metadados filtrados */}
+                      {isRowExpanded && (
+                        <tr className="bg-muted/40 border-b border-border">
+                          <td colSpan={4} className="p-4 font-sans text-xs">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
+                                  <Layers className="h-3.5 w-3.5 text-primary" /> Metadados Filtrados (dados_extra)
+                                </span>
+                                <Badge variant="outline" className="font-mono text-[10px]">ID: {r.id}</Badge>
+                              </div>
+
+                              {/* Grade com os metadados filtrados */}
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 bg-background p-3 rounded-lg border border-border">
+                                {filteredExtraEntries.map(([k, v]) => (
+                                  <div key={k} className="p-2 rounded bg-card border border-border/50 text-[11px]">
+                                    <span className="text-[10px] text-muted-foreground font-mono uppercase block">{k}</span>
+                                    <span className="font-semibold text-foreground break-all">
+                                      {v === null || v === undefined ? "—" : String(v)}
+                                    </span>
+                                  </div>
+                                ))}
+                                {filteredExtraEntries.length === 0 && (
+                                  <div className="col-span-full text-xs text-muted-foreground text-center py-2">
+                                    Nenhum metadado adicional gravado.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+
+                {(!selectedCellDetail || selectedCellDetail.records.length === 0) && (
+                  <tr>
+                    <td colSpan={4} className="py-8 text-center text-muted-foreground font-sans">
+                      Nenhum lançamento individual encontrado para este mês.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
