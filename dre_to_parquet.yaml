@@ -1,6 +1,6 @@
 id: dre_to_parquet
 namespace: continental.finance
-description: Pipeline para extração do DRE Detalhado e conversão para Parquet no Supabase
+description: Pipeline para extração de DRE Detalhado e Faturamento da Loja diretamente para o Supabase PostgreSQL
 
 tasks:
   - id: extract_and_convert
@@ -12,19 +12,14 @@ tasks:
       DRE_API_KEY: "{{ kv('DRE_API_KEY') }}"
       DRE_CLIENT_ID: "{{ kv('DRE_CLIENT_ID') }}"
       DRE_CLIENT_SECRET: "{{ kv('DRE_CLIENT_SECRET') }}"
-      SUPABASE_ACCESS_KEY_ID: "{{ kv('SUPABASE_ACCESS_KEY_ID') }}"
-      SUPABASE_SECRET_ACCESS_KEY: "{{ kv('SUPABASE_SECRET_ACCESS_KEY') }}"
-      SUPABASE_BUCKET: "{{ kv('SUPABASE_BUCKET') }}"
-      SUPABASE_S3_ENDPOINT: "{{ kv('SUPABASE_S3_ENDPOINT') }}"
+      SUPABASE_URL: "{{ kv('SUPABASE_URL') }}"
       SUPABASE_API_KEY: "{{ kv('SUPABASE_API_KEY') }}"
-      SUPABASE_REGION: "us-east-1"
     script: |
       import sys
       import subprocess
       import urllib.request
 
       # --- CONFIGURAÇÃO DO REPOSITÓRIO GITHUB ---
-      # IMPORTANTE: Troque a URL abaixo pela URL 'raw' real do seu repositório onde este código ficará
       GITHUB_REPO_URL = "https://raw.githubusercontent.com/scoretecnologia/grupo-r3-api/main"
       SCRIPT_NAME = "dre_to_parquet.py"
       REQS_NAME = "requirements.txt"
@@ -39,7 +34,7 @@ tasks:
               print(f"❌ Erro ao baixar {filename}: {e}")
               sys.exit(1)
 
-      # Baixa os arquivos necessários
+      # Baixa os arquivos necessários do repositório
       download_file(REQS_NAME)
       download_file(SCRIPT_NAME)
 
@@ -54,4 +49,4 @@ tasks:
 triggers:
   - id: schedule
     type: io.kestra.plugin.core.trigger.Schedule
-    cron: "0 2 * * *" # Roda todos os dias às 02:00 da manhã (Ajuste conforme necessidade)
+    cron: "0 2 * * *" # Roda todos os dias às 02:00 da manhã
