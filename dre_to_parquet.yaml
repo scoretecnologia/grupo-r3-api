@@ -1,6 +1,34 @@
-id: dre_to_parquet
+﻿id: dre_to_parquet
 namespace: continental.finance
 description: Pipeline para extração de DRE Detalhado e Faturamento da Loja diretamente para o Supabase PostgreSQL
+
+inputs:
+  - id: servidor_id
+    type: STRING
+    required: true
+    description: "ID do servidor/matriz (ex: '1'). Use TODOS para processar todas as ativas."
+    defaults: "TODOS"
+  - id: cidade_id
+    type: STRING
+    required: false
+    description: "ID da subloja/cidade (opcional)"
+  - id: mes_referencia
+    type: STRING
+    required: false
+    description: "Mês específico no formato YYYY-MM (ex: '2026-08'). Deixe vazio para usar config do banco ou mês atual."
+  - id: carga_completa
+    type: BOOLEAN
+    required: true
+    description: "Se true, força extração desde 2025"
+    defaults: false
+
+triggers:
+  - id: schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 2 * * *" # Roda todos os dias às 02:00 da manhã
+  - id: webhook_trigger
+    type: io.kestra.plugin.core.trigger.Webhook
+    key: "R3_FINANCE_EXTRACT_KEY"
 
 tasks:
   - id: extract_and_convert
@@ -14,6 +42,10 @@ tasks:
       DRE_CLIENT_SECRET: "{{ kv('DRE_CLIENT_SECRET') }}"
       SUPABASE_URL: "{{ kv('SUPABASE_URL') }}"
       SUPABASE_API_KEY: "{{ kv('SUPABASE_API_KEY') }}"
+      KESTRA_SERVIDOR_ID: "{{ trigger.body.servidor_id ?? inputs.servidor_id ?? 'TODOS' }}"
+      KESTRA_CIDADE_ID: "{{ trigger.body.cidade_id ?? inputs.cidade_id ?? '' }}"
+      KESTRA_MES_REFERENCIA: "{{ trigger.body.mes_referencia ?? inputs.mes_referencia ?? '' }}"
+      KESTRA_CARGA_COMPLETA: "{{ trigger.body.carga_completa ?? inputs.carga_completa ?? false }}"
     script: |
       import sys
       import subprocess
@@ -45,8 +77,3 @@ tasks:
       # Executa o script principal
       print(f"Iniciando execução do {SCRIPT_NAME}...")
       subprocess.check_call([sys.executable, SCRIPT_NAME])
-
-triggers:
-  - id: schedule
-    type: io.kestra.plugin.core.trigger.Schedule
-    cron: "0 2 * * *" # Roda todos os dias às 02:00 da manhã

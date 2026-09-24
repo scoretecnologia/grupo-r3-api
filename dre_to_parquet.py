@@ -48,7 +48,7 @@ if not SUPABASE_API_KEY:
 if not SUPABASE_API_URL:
     SUPABASE_API_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
 
-def fetch_tarefas_supabase():
+def fetch_tarefas_supabase(target_servidor_id=None):
     if not SUPABASE_API_URL or not SUPABASE_API_KEY:
         logger.error("SUPABASE_URL ou SUPABASE_API_KEY não configurados. Impossível buscar lojas.")
         return []
@@ -63,7 +63,10 @@ def fetch_tarefas_supabase():
     
     # 1. Buscar servidores (matrizes)
     try:
-        url_srv = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_servidores?ativo=eq.true"
+        if target_servidor_id:
+            url_srv = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_servidores?servidor_id=eq.{target_servidor_id}"
+        else:
+            url_srv = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_servidores?ativo=eq.true"
         resp_srv = requests.get(url_srv, headers=headers)
         if resp_srv.status_code == 200:
             for srv in resp_srv.json():
@@ -82,7 +85,10 @@ def fetch_tarefas_supabase():
 
     # 2. Buscar sublojas
     try:
-        url_sub = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_sublojas?ativo=eq.true"
+        if target_servidor_id:
+            url_sub = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_sublojas?servidor_id=eq.{target_servidor_id}"
+        else:
+            url_sub = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_sublojas?ativo=eq.true"
         resp_sub = requests.get(url_sub, headers=headers)
         if resp_sub.status_code == 200:
             for sub in resp_sub.json():
@@ -367,18 +373,64 @@ def save_faturamento_to_supabase_db(dados_fat, srv_id, cid_id, mes_inicio, mes_f
     return False
 
 
+
+def get_kestra_overrides():
+    """
+    Lê parâmetros manuais injetados pelo Kestra via Webhook ou Inputs.
+    """
+    srv_id = os.getenv("KESTRA_SERVIDOR_ID", "").strip()
+    cid_id = os.getenv("KESTRA_CIDADE_ID", "").strip()
+    mes_ref = os.getenv("KESTRA_MES_REFERENCIA", "").strip()
+    carga_comp_raw = os.getenv("KESTRA_CARGA_COMPLETA", "").strip().lower()
+    carga_comp = carga_comp_raw in ["true", "1", "t", "yes"]
+
+    return {
+        "servidor_id": srv_id if srv_id and srv_id.upper() != "TODOS" else None,
+        "cidade_id": cid_id if cid_id else None,
+        "mes_referencia": mes_ref if mes_ref else None,
+        "carga_completa": carga_comp
+    }
+
 if __name__ == "__main__":
     start_time = datetime.now()
     log_header("Iniciando Ingestão Direta DRE & Faturamento -> Supabase PostgreSQL")
     
+    overrides = get_kestra_overrides()
+    if any(v is not None and v is not False for v in overrides.values()):
+        logger.info(f"⚡ Parâmetros manuais detectados (Kestra Webhook/Input): {overrides}")
+
     pipeline = GrupoR3ETLPipeline()
-    tarefas = fetch_tarefas_supabase()
+    tarefas = fetch_tarefas_supabase(overrides.get("servidor_id"))
     
-    logger.info(f"Lojas ativas encontradas para processamento: {len(tarefas)}")
+    # Se servidor_id específico foi passado, filtra
+    if overrides.get("servidor_id"):
+        try:
+            target_srv = int(overrides["servidor_id"])
+            tarefas = [t for t in tarefas if t["servidor_id"] == target_srv]
+        except ValueError:
+            pass
+
+    # Se cidade_id específica foi passada, filtra
+    if overrides.get("cidade_id"):
+        try:
+            target_cid = int(overrides["cidade_id"])
+            tarefas = [t for t in tarefas if t.get("cidade_id") == target_cid]
+        except ValueError:
+            pass
+
+    # Aplica sobrescrita de período se informado no webhook
+    for t in tarefas:
+        if overrides.get("carga_completa"):
+            t["carga_completa"] = True
+        elif overrides.get("mes_referencia"):
+            t["mes_referencia"] = overrides["mes_referencia"]
+            t["carga_completa"] = False
+
+    logger.info(f"Lojas selecionadas para processamento: {len(tarefas)}")
     
     for idx, t in enumerate(tarefas):
         pipeline.process_task(t)
         time.sleep(2)
         
     duration = datetime.now() - start_time
-    log_header(f"Ingestão Finalizada. Duração Total: {duration}")
+    log_header(f"Ingestão Finalizada com Sucesso! Duração Total: {duration}")
