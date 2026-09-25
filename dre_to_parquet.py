@@ -237,7 +237,7 @@ def get_plano_contas_depara():
     mapping = {}
     if SUPABASE_API_URL and SUPABASE_API_KEY:
         try:
-            url = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_plano_contas_depara?select=conta_origem,conta_padronizada,grupo_dre"
+            url = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_plano_contas_depara?select=conta_origem,conta_padronizada,grupo_dre,natureza"
             headers = {
                 "apikey": SUPABASE_API_KEY,
                 "Authorization": f"Bearer {SUPABASE_API_KEY}"
@@ -247,7 +247,8 @@ def get_plano_contas_depara():
                 for item in resp.json():
                     mapping[item["conta_origem"]] = {
                         "conta_padronizada": item["conta_padronizada"],
-                        "grupo_dre": item["grupo_dre"]
+                        "grupo_dre": item["grupo_dre"],
+                        "natureza": item.get("natureza", "Despesa Fixa")
                     }
         except Exception as e:
             logger.warning(f"Aviso ao carregar de-para de plano de contas: {e}")
@@ -306,6 +307,7 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
         depara_entry = depara_map.get(norm_desc, {})
         conta_pad = depara_entry.get("conta_padronizada") or (raw_desc if raw_desc else "Outras Contas")
         grupo_pad = depara_entry.get("grupo_dre") or "Despesas Administrativas"
+        natureza_pad = depara_entry.get("natureza") or "Despesa Fixa"
 
         rec = {
             "id_servidor": int(srv_id),
@@ -318,6 +320,7 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
             "descricao_conta": raw_desc if raw_desc else None,
             "conta_padronizada": conta_pad,
             "grupo_dre": grupo_pad,
+            "natureza": natureza_pad,
             "categoria": str(row[col_cat]) if (col_cat and not pd.isna(row[col_cat])) else "Outras Despesas",
             "debito": float(row.get("debito", 0.0)) if not pd.isna(row.get("debito")) else 0.0,
             "credito": float(row.get("credito", 0.0)) if not pd.isna(row.get("credito")) else 0.0,
