@@ -226,6 +226,34 @@ class GrupoR3ETLPipeline:
             time.sleep(2) # Pausa amigável entre os meses
 
 
+
+_PLANO_CONTAS_DEPARA_CACHE = None
+
+def get_plano_contas_depara():
+    global _PLANO_CONTAS_DEPARA_CACHE
+    if _PLANO_CONTAS_DEPARA_CACHE is not None:
+        return _PLANO_CONTAS_DEPARA_CACHE
+    
+    mapping = {}
+    if SUPABASE_API_URL and SUPABASE_API_KEY:
+        try:
+            url = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_plano_contas_depara?select=conta_origem,conta_padronizada,grupo_dre"
+            headers = {
+                "apikey": SUPABASE_API_KEY,
+                "Authorization": f"Bearer {SUPABASE_API_KEY}"
+            }
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                for item in resp.json():
+                    mapping[item["conta_origem"]] = {
+                        "conta_padronizada": item["conta_padronizada"],
+                        "grupo_dre": item["grupo_dre"]
+                    }
+        except Exception as e:
+            logger.warning(f"Aviso ao carregar de-para de plano de contas: {e}")
+    _PLANO_CONTAS_DEPARA_CACHE = mapping
+    return mapping
+
 def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
     """
     Insere/atualiza os lançamentos do DRE no Supabase PostgreSQL via API REST.
@@ -268,10 +296,17 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
 
     known_cols = {'id_servidor', 'loja', 'id_cidade', 'cidade', 'debito', 'credito', 'valorLiquido', 'codigoConta', 'descricaoConta', 'codigo', 'descricao', 'planoCodigo', 'planoDescricao', 'conta', 'contaDescricao', 'categoriaPlanoContas', 'categoria', 'categoriaConta'}
 
+    depara_map = get_plano_contas_depara()
     registros = []
     for _, row in df.iterrows():
         extra_data = {k: (None if pd.isna(v) else v) for k, v in row.items() if k not in known_cols}
         
+        raw_desc = str(row[col_desc]) if (col_desc and not pd.isna(row[col_desc])) else ""
+        norm_desc = re.sub(r'\s+', ' ', raw_desc).strip().upper()
+        depara_entry = depara_map.get(norm_desc, {})
+        conta_pad = depara_entry.get("conta_padronizada") or (raw_desc if raw_desc else "Outras Contas")
+        grupo_pad = depara_entry.get("grupo_dre") or "Despesas Administrativas"
+
         rec = {
             "id_servidor": int(srv_id),
             "id_cidade": int(cid_id) if cid_id else None,
@@ -280,7 +315,9 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
             "mes_inicio": str(mes_inicio),
             "mes_fim": str(mes_fim),
             "codigo_conta": str(row[col_codigo]) if (col_codigo and not pd.isna(row[col_codigo])) else None,
-            "descricao_conta": str(row[col_desc]) if (col_desc and not pd.isna(row[col_desc])) else None,
+            "descricao_conta": raw_desc if raw_desc else None,
+            "conta_padronizada": conta_pad,
+            "grupo_dre": grupo_pad,
             "categoria": str(row[col_cat]) if (col_cat and not pd.isna(row[col_cat])) else "Outras Despesas",
             "debito": float(row.get("debito", 0.0)) if not pd.isna(row.get("debito")) else 0.0,
             "credito": float(row.get("credito", 0.0)) if not pd.isna(row.get("credito")) else 0.0,
