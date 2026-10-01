@@ -1,4 +1,6 @@
 import os
+import re
+import sys
 import time
 import logging
 import requests
@@ -229,6 +231,10 @@ class GrupoR3ETLPipeline:
 
 _PLANO_CONTAS_DEPARA_CACHE = None
 
+def normalizar_descricao(texto):
+    """Mesma normalizacao usada pelo dashboard ao salvar o de-para: trim, espacos simples, maiusculas."""
+    return re.sub(r"\s+", " ", str(texto or "")).strip().upper()
+
 def get_plano_contas_depara():
     global _PLANO_CONTAS_DEPARA_CACHE
     if _PLANO_CONTAS_DEPARA_CACHE is not None:
@@ -237,7 +243,7 @@ def get_plano_contas_depara():
     mapping = {}
     if SUPABASE_API_URL and SUPABASE_API_KEY:
         try:
-            url = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_plano_contas_depara?select=conta_origem,conta_padronizada,grupo_dre,natureza"
+            url = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_plano_contas_depara?select=conta_origem,conta_padronizada,grupo_dre,natureza&ativo=eq.true"
             headers = {
                 "apikey": SUPABASE_API_KEY,
                 "Authorization": f"Bearer {SUPABASE_API_KEY}"
@@ -245,7 +251,10 @@ def get_plano_contas_depara():
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
                 for item in resp.json():
-                    mapping[item["conta_origem"]] = {
+                    chave = normalizar_descricao(item.get("conta_origem") or "")
+                    if not chave:
+                        continue
+                    mapping[chave] = {
                         "conta_padronizada": item["conta_padronizada"],
                         "grupo_dre": item["grupo_dre"],
                         "natureza": item.get("natureza", "Despesa Fixa")
@@ -272,20 +281,6 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
 
     endpoint = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_dre_detalhado"
 
-    # Idempotência: Deletar registros pré-existentes da mesma loja e período
-    try:
-        delete_url = f"{endpoint}?id_servidor=eq.{srv_id}&mes_inicio=eq.{mes_inicio}&mes_fim=eq.{mes_fim}"
-        if cid_id:
-            delete_url += f"&id_cidade=eq.{cid_id}"
-        else:
-            delete_url += f"&id_cidade=is.null"
-
-        resp_del = requests.delete(delete_url, headers=headers)
-        if resp_del.status_code not in [200, 204]:
-            logger.warning(f"      ⚠️ Aviso na limpeza DRE: HTTP {resp_del.status_code}")
-    except Exception as e:
-        logger.error(f"      ❌ Erro na limpeza DRE: {e}")
-
     # Sanitizar colunas numéricas
     for col in ['debito', 'credito', 'valorLiquido']:
         if col in df.columns:
@@ -303,7 +298,7 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
         extra_data = {k: (None if pd.isna(v) else v) for k, v in row.items() if k not in known_cols}
         
         raw_desc = str(row[col_desc]) if (col_desc and not pd.isna(row[col_desc])) else ""
-        norm_desc = re.sub(r'\s+', ' ', raw_desc).strip().upper()
+        norm_desc = normalizar_descricao(raw_desc)
         depara_entry = depara_map.get(norm_desc, {})
         conta_pad = depara_entry.get("conta_padronizada") or (raw_desc if raw_desc else "Outras Contas")
         grupo_pad = depara_entry.get("grupo_dre") or "Despesas Administrativas"
@@ -328,6 +323,24 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
             "dados_extra": extra_data
         }
         registros.append(rec)
+
+    if not registros:
+        logger.info("      ↳ DRE sem registros válidos para inserir; nada foi apagado.")
+        return False
+
+    # Idempotência: apagar o período só depois de transformar tudo, logo antes de inserir
+    try:
+        delete_url = f"{endpoint}?id_servidor=eq.{srv_id}&mes_inicio=eq.{mes_inicio}&mes_fim=eq.{mes_fim}"
+        if cid_id:
+            delete_url += f"&id_cidade=eq.{cid_id}"
+        else:
+            delete_url += f"&id_cidade=is.null"
+
+        resp_del = requests.delete(delete_url, headers=headers)
+        if resp_del.status_code not in [200, 204]:
+            logger.warning(f"      ⚠️ Aviso na limpeza DRE: HTTP {resp_del.status_code}")
+    except Exception as e:
+        logger.error(f"      ❌ Erro na limpeza DRE: {e}")
 
     # Inserir em lotes de 500 registros
     batch_size = 500
@@ -468,9 +481,17 @@ if __name__ == "__main__":
 
     logger.info(f"Lojas selecionadas para processamento: {len(tarefas)}")
     
+    falhas = 0
     for idx, t in enumerate(tarefas):
-        pipeline.process_task(t)
+        try:
+            pipeline.process_task(t)
+        except Exception as e:
+            falhas += 1
+            logger.exception(f"❌ Falha inesperada ao processar servidor {t.get('servidor_id')} / cidade {t.get('cidade_id')}: {e}")
         time.sleep(2)
         
     duration = datetime.now() - start_time
+    if falhas:
+        log_header(f"Ingestão finalizada com {falhas} loja(s) em falha. Duração Total: {duration}")
+        sys.exit(1)
     log_header(f"Ingestão Finalizada com Sucesso! Duração Total: {duration}")
