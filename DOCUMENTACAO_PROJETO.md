@@ -54,7 +54,7 @@ flowchart TD
 ## 🔍 2. Componentes em Detalhes
 
 ### 🐍 2.1. Pipeline de Extração ETL (`dre_to_parquet.py`)
-O script [dre_to_parquet.py](file:///c:/Users/LucasVitorino/Documents/grupo-r3-api/dre_to_parquet.py) é o motor de ingestão de dados.
+O script [dre_to_parquet.py](dre_to_parquet.py) é o motor de ingestão de dados.
 
 - **Busca Dinâmica de Tarefas (`fetch_tarefas_supabase`)**:
   Conecta-se à API REST do Supabase para consultar as matrizes ativas (`grupo_r3_servidores`) e filiais ativas (`grupo_r3_sublojas`).
@@ -81,7 +81,7 @@ O script [dre_to_parquet.py](file:///c:/Users/LucasVitorino/Documents/grupo-r3-a
 ---
 
 ### ⏱️ 2.2. Orquestração no Kestra (`dre_to_parquet.yaml`)
-O fluxo [dre_to_parquet.yaml](file:///c:/Users/LucasVitorino/Documents/grupo-r3-api/dre_to_parquet.yaml) gerencia a execução automatizada.
+O fluxo [dre_to_parquet.yaml](dre_to_parquet.yaml) gerencia a execução automatizada.
 
 - **Agendamento**: Executado automaticamente todos os dias às **02:00 da manhã** (`cron: "0 2 * * *"`).
 - **Ambiente Isolado**: Roda em um container Docker (`ghcr.io/kestra-io/pydata:latest`).
