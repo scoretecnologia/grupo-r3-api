@@ -14,7 +14,7 @@ A solução de engenharia de dados e gestão financeira do Grupo R3 é composta 
 
 ## 🏗️ 1. Arquitetura Geral do Sistema
 
-A solução foi projetada em uma arquitetura desacoplada e escalável, integrando pipeline ETL em Python, orquestrador de tarefas Kestra, banco de dados PostgreSQL/Storage Supabase e um frontend em React 19.
+A solução foi projetada em uma arquitetura desacoplada e escalável, integrando pipeline ETL em Python, orquestrador de tarefas Kestra, banco de dados PostgreSQL no Supabase e um frontend em React 19 (repositório separado).
 
 ```mermaid
 flowchart TD
@@ -94,7 +94,7 @@ O fluxo [dre_to_parquet.yaml](file:///c:/Users/LucasVitorino/Documents/grupo-r3-
 ---
 
 ### 🗄️ 2.3. Banco de Dados & Segurança (`supabase_r3_tables.sql` e RLS)
-O script SQL [supabase_r3_tables.sql](file:///c:/Users/LucasVitorino/Documents/grupo-r3-api/supabase_r3_tables.sql) modela a estrutura relacional no Supabase PostgreSQL:
+O script SQL [supabase_r3_tables.sql](supabase_r3_tables.sql) (idempotente) modela a estrutura relacional no Supabase PostgreSQL:
 
 1. **`grupo_r3_servidores` (Lojas Matrizes)**:
    - `servidor_id` (PK, INT): ID do servidor de banco da loja matriz.
@@ -113,7 +113,7 @@ O script SQL [supabase_r3_tables.sql](file:///c:/Users/LucasVitorino/Documents/g
 6. **`grupo_r3_parceiros_regras`** (gerida pelo dashboard): `parceiro_nome`, `servidor_id`/`cidade_id`, `percentual_comissao`, `ativo`. Usada na apuração de comissões da DRE.
 7. **Segurança e Roles (Row Level Security - RLS)**:
    - Tabela `grupo_r3_users` vinculada ao `auth.users` do Supabase.
-   - Políticas RLS (`fix_rls.sql`, `fix_rls_lojas.sql`, `fix_storage_policies.sql`) garantindo que apenas usuários com nível `admin` possam inserir, alterar ou deletar lojas e sublojas.
+   - Políticas RLS (migrations do repositório do dashboard) garantindo que apenas usuários com nível `admin` possam inserir, alterar ou deletar lojas e sublojas.
 
 ---
 
