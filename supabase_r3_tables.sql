@@ -87,6 +87,37 @@ ALTER TABLE public.grupo_r3_dre_detalhado ADD COLUMN IF NOT EXISTS grupo_dre TEX
 ALTER TABLE public.grupo_r3_dre_detalhado ADD COLUMN IF NOT EXISTS natureza TEXT;
 
 -- ------------------------------------------------------------------------------
+-- 4.1. Tabela de Receber Detalhado (Receitas)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.grupo_r3_receber_detalhado (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_servidor INT NOT NULL REFERENCES public.grupo_r3_servidores(servidor_id) ON DELETE CASCADE,
+    id_cidade INT NULL REFERENCES public.grupo_r3_sublojas(cidade_id) ON DELETE CASCADE,
+    loja TEXT NOT NULL,
+    cidade TEXT NOT NULL,
+    mes_inicio DATE NOT NULL,
+    mes_fim DATE NOT NULL,
+    codigo_conta TEXT,
+    descricao_conta TEXT,
+    categoria TEXT,
+    conta_padronizada TEXT,
+    grupo_dre TEXT,
+    natureza TEXT,
+    debito NUMERIC(15, 2) DEFAULT 0.00,
+    credito NUMERIC(15, 2) DEFAULT 0.00,
+    valor_liquido NUMERIC(15, 2) DEFAULT 0.00,
+    dados_extra JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_receber_servidor_cidade ON public.grupo_r3_receber_detalhado (id_servidor, id_cidade);
+CREATE INDEX IF NOT EXISTS idx_receber_periodo ON public.grupo_r3_receber_detalhado (mes_inicio, mes_fim);
+CREATE INDEX IF NOT EXISTS idx_receber_codigo_conta ON public.grupo_r3_receber_detalhado (codigo_conta);
+CREATE INDEX IF NOT EXISTS idx_receber_categoria ON public.grupo_r3_receber_detalhado (categoria);
+CREATE INDEX IF NOT EXISTS idx_receber_grupo_dre ON public.grupo_r3_receber_detalhado (grupo_dre);
+
+-- ------------------------------------------------------------------------------
 -- 5. Tabela de Faturamento por Loja
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.grupo_r3_faturamento_loja (
@@ -157,6 +188,7 @@ ALTER TABLE public.grupo_r3_servidores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grupo_r3_sublojas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grupo_r3_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grupo_r3_dre_detalhado ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.grupo_r3_receber_detalhado ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grupo_r3_faturamento_loja ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grupo_r3_plano_contas_depara ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grupo_r3_parceiros_regras ENABLE ROW LEVEL SECURITY;
@@ -165,6 +197,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.grupo_r3_servidores TO anon, auth
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.grupo_r3_sublojas TO anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.grupo_r3_users TO anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.grupo_r3_dre_detalhado TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.grupo_r3_receber_detalhado TO anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.grupo_r3_faturamento_loja TO anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.grupo_r3_plano_contas_depara TO anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.grupo_r3_parceiros_regras TO anon, authenticated, service_role;
@@ -181,6 +214,12 @@ CREATE POLICY "Permitir leitura publica/autenticada no DRE" ON public.grupo_r3_d
 
 DROP POLICY IF EXISTS "Permitir gerenciamento total do DRE" ON public.grupo_r3_dre_detalhado;
 CREATE POLICY "Permitir gerenciamento total do DRE" ON public.grupo_r3_dre_detalhado FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Permitir leitura publica/autenticada no Receber" ON public.grupo_r3_receber_detalhado;
+CREATE POLICY "Permitir leitura publica/autenticada no Receber" ON public.grupo_r3_receber_detalhado FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Permitir gerenciamento total do Receber" ON public.grupo_r3_receber_detalhado;
+CREATE POLICY "Permitir gerenciamento total do Receber" ON public.grupo_r3_receber_detalhado FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Permitir leitura publica/autenticada no Faturamento" ON public.grupo_r3_faturamento_loja;
 CREATE POLICY "Permitir leitura publica/autenticada no Faturamento" ON public.grupo_r3_faturamento_loja FOR SELECT USING (true);

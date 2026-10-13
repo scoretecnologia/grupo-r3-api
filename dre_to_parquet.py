@@ -32,6 +32,7 @@ load_env()
 # --- CONFIGURAÇÕES DA API CONTINENTAL ---
 API_BASE_URL = "https://continental.feiraodovinte.com.br/api/integracao"
 API_DRE_URL = f"{API_BASE_URL}/dre-detalhado"
+API_DRE_RECEBER_URL = f"{API_BASE_URL}/dre-detalhado-receber"
 API_FATURAMENTO_URL = f"{API_BASE_URL}/faturamento-loja"
 
 API_KEY = os.getenv("DRE_API_KEY")
@@ -167,6 +168,30 @@ class GrupoR3ETLPipeline:
                 time.sleep(5)
         return None
 
+    def fetch_dre_receber(self, servidor_id, inicio, fim, cidade_id=None, retries=3):
+        params = {'servidorId': servidor_id, 'inicio': inicio, 'fim': fim}
+        if cidade_id:
+            params['cidadeId'] = cidade_id
+            
+        for tentativa in range(retries):
+            try:
+                response = requests.get(API_DRE_RECEBER_URL, headers=self.headers, params=params, timeout=60)
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 429:
+                    logger.warning(f"Rate limit DRE Receber. Aguardando 10s... (Tentativa {tentativa+1}/{retries})")
+                    time.sleep(10)
+                elif response.status_code in [500, 502, 503, 504]:
+                    logger.warning(f"Erro interno API DRE Receber ({response.status_code}). Aguardando 5s... (Tentativa {tentativa+1}/{retries})")
+                    time.sleep(5)
+                else:
+                    logger.error(f"Erro DRE Receber {response.status_code}: {response.text}")
+                    return None
+            except Exception as e:
+                logger.error(f"Falha na conexão DRE Receber: {str(e)}")
+                time.sleep(5)
+        return None
+
     def process_task(self, tarefa):
         srv_id = tarefa['servidor_id']
         cid_id = tarefa['cidade_id']
@@ -224,6 +249,24 @@ class GrupoR3ETLPipeline:
                 save_faturamento_to_supabase_db(dados_fat, srv_id, cid_id, mes_inicio, mes_fim, tarefa['loja'], nome_cidade)
             else:
                 logger.info("      ↳ Faturamento sem dados ou erro na extração.")
+
+            # --- 3. PROCESSAR DRE RECEBER (RECEITAS DETALHADAS) ---
+            try:
+                dados_rec = self.fetch_dre_receber(srv_id, mes_inicio, mes_fim, cid_id)
+                if dados_rec:
+                    df_rec = pd.DataFrame(dados_rec)
+                    if not df_rec.empty:
+                        df_rec['id_servidor'] = srv_id
+                        df_rec['loja'] = tarefa['loja']
+                        df_rec['id_cidade'] = cid_id if cid_id else None
+                        df_rec['cidade'] = nome_cidade
+                        save_receber_to_supabase_db(df_rec, srv_id, cid_id, mes_inicio, mes_fim)
+                    else:
+                        logger.info("      ↳ DRE Receber retornou lista vazia.")
+                else:
+                    logger.info("      ↳ DRE Receber sem dados ou indisponível no momento.")
+            except Exception as e:
+                logger.warning(f"      ⚠️ Aviso ao processar DRE Receber: {e}")
                 
             time.sleep(2) # Pausa amigável entre os meses
 
@@ -357,6 +400,103 @@ def save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
             logger.error(f"      ❌ Falha ao enviar DRE para o Banco: {e}")
 
     logger.info(f"      🗄️ DRE salvo no Banco: {inseridos} registros inseridos em grupo_r3_dre_detalhado")
+    return True
+
+
+def save_receber_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
+    """
+    Insere/atualiza os lançamentos de Receber (Receitas) no Supabase PostgreSQL via API REST.
+    Tabela: grupo_r3_receber_detalhado
+    """
+    if not SUPABASE_API_URL or not SUPABASE_API_KEY:
+        logger.warning("      ⚠️ Supabase API não configurada. Inserção Receber ignorada.")
+        return False
+
+    headers = {
+        "apikey": SUPABASE_API_KEY,
+        "Authorization": f"Bearer {SUPABASE_API_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+    }
+
+    endpoint = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_receber_detalhado"
+
+    # Sanitizar colunas numéricas
+    for col in ['debito', 'credito', 'valorLiquido']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    col_codigo = next((c for c in ['planoCodigo', 'codigoConta', 'codigo', 'conta'] if c in df.columns), None)
+    col_desc = next((c for c in ['planoDescricao', 'descricaoConta', 'descricao', 'contaDescricao'] if c in df.columns), None)
+    col_cat = next((c for c in ['categoriaPlanoContas', 'categoria', 'categoriaConta'] if c in df.columns), None)
+
+    known_cols = {'id_servidor', 'loja', 'id_cidade', 'cidade', 'debito', 'credito', 'valorLiquido', 'codigoConta', 'descricaoConta', 'codigo', 'descricao', 'planoCodigo', 'planoDescricao', 'conta', 'contaDescricao', 'categoriaPlanoContas', 'categoria', 'categoriaConta'}
+
+    depara_map = get_plano_contas_depara()
+    registros = []
+    for _, row in df.iterrows():
+        extra_data = {k: (None if pd.isna(v) else v) for k, v in row.items() if k not in known_cols}
+        
+        raw_desc = str(row[col_desc]) if (col_desc and not pd.isna(row[col_desc])) else ""
+        norm_desc = normalizar_descricao(raw_desc)
+        depara_entry = depara_map.get(norm_desc, {})
+        conta_pad = depara_entry.get("conta_padronizada") or (raw_desc if raw_desc else "Receitas Diversas")
+        grupo_pad = depara_entry.get("grupo_dre") or "Receita Operacional"
+        natureza_pad = depara_entry.get("natureza") or "Receita"
+
+        rec = {
+            "id_servidor": int(srv_id),
+            "id_cidade": int(cid_id) if cid_id else None,
+            "loja": str(row.get("loja", "")),
+            "cidade": str(row.get("cidade", "Matriz")),
+            "mes_inicio": str(mes_inicio),
+            "mes_fim": str(mes_fim),
+            "codigo_conta": str(row[col_codigo]) if (col_codigo and not pd.isna(row[col_codigo])) else None,
+            "descricao_conta": raw_desc if raw_desc else None,
+            "conta_padronizada": conta_pad,
+            "grupo_dre": grupo_pad,
+            "natureza": natureza_pad,
+            "categoria": str(row[col_cat]) if (col_cat and not pd.isna(row[col_cat])) else "Receitas",
+            "debito": float(row.get("debito", 0.0)) if not pd.isna(row.get("debito")) else 0.0,
+            "credito": float(row.get("credito", 0.0)) if not pd.isna(row.get("credito")) else 0.0,
+            "valor_liquido": float(row.get("valorLiquido", 0.0)) if not pd.isna(row.get("valorLiquido")) else 0.0,
+            "dados_extra": extra_data
+        }
+        registros.append(rec)
+
+    if not registros:
+        logger.info("      ↳ Receber sem registros válidos para inserir; nada foi apagado.")
+        return False
+
+    # Idempotência: apagar o período só depois de transformar tudo, logo antes de inserir
+    try:
+        delete_url = f"{endpoint}?id_servidor=eq.{srv_id}&mes_inicio=eq.{mes_inicio}&mes_fim=eq.{mes_fim}"
+        if cid_id:
+            delete_url += f"&id_cidade=eq.{cid_id}"
+        else:
+            delete_url += f"&id_cidade=is.null"
+
+        resp_del = requests.delete(delete_url, headers=headers)
+        if resp_del.status_code not in [200, 204]:
+            logger.warning(f"      ⚠️ Aviso na limpeza Receber: HTTP {resp_del.status_code}")
+    except Exception as e:
+        logger.error(f"      ❌ Erro na limpeza Receber: {e}")
+
+    # Inserir em lotes de 500 registros
+    batch_size = 500
+    inseridos = 0
+    for i in range(0, len(registros), batch_size):
+        chunk = registros[i:i + batch_size]
+        try:
+            resp_ins = requests.post(endpoint, headers=headers, json=chunk)
+            if resp_ins.status_code in [200, 201]:
+                inseridos += len(chunk)
+            else:
+                logger.error(f"      ❌ Erro ao inserir Receber no Banco: {resp_ins.status_code} - {resp_ins.text}")
+        except Exception as e:
+            logger.error(f"      ❌ Falha ao enviar Receber para o Banco: {e}")
+
+    logger.info(f"      🗄️ Receber salvo no Banco: {inseridos} registros inseridos em grupo_r3_receber_detalhado")
     return True
 
 

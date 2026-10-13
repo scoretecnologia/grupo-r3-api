@@ -31,7 +31,7 @@ flowchart TD
     end
 
     subgraph Supabase [Supabase Backend]
-        DB[("PostgreSQL\n• grupo_r3_servidores / sublojas (escopo)\n• grupo_r3_plano_contas_depara\n• grupo_r3_parceiros_regras\n• grupo_r3_dre_detalhado\n• grupo_r3_faturamento_loja\n• grupo_r3_users")]
+        DB[("PostgreSQL\n• grupo_r3_servidores / sublojas (escopo)\n• grupo_r3_plano_contas_depara\n• grupo_r3_parceiros_regras\n• grupo_r3_dre_detalhado (despesas)\n• grupo_r3_receber_detalhado (receitas)\n• grupo_r3_faturamento_loja\n• grupo_r3_users")]
     end
 
     subgraph Frontend [Dashboard Web React 19 - repo r3-finance-dash]
@@ -72,7 +72,8 @@ O script [dre_to_parquet.py](dre_to_parquet.py) é o motor de ingestão de dados
   - Aplica o **de-para do plano de contas** (`grupo_r3_plano_contas_depara`, somente regras com `ativo = true`): casa `descricao_conta` com `conta_origem` após normalizar (trim, espaços simples, maiúsculas) e preenche `conta_padronizada`, `grupo_dre` e `natureza`. Sem regra, cai em "Despesas Administrativas" / "Despesa Fixa".
   - Campos não mapeados da API vão para `dados_extra` (JSONB).
 - **Gravação idempotente no PostgreSQL (API REST do Supabase)**:
-  - Transforma tudo primeiro; só então apaga os registros da mesma loja/período e insere em lotes de 500.
+  - DRE Despesas: registros por lançamento em `grupo_r3_dre_detalhado`.
+  - DRE Receitas: registros por lançamento em `grupo_r3_receber_detalhado`.
   - Faturamento: um registro por loja/período em `grupo_r3_faturamento_loja`.
   - Uma loja com falha é registrada no log e não interrompe as demais; a execução termina com código 1 para o Kestra sinalizar.
 - **Sobrescritas do Kestra** (`KESTRA_SERVIDOR_ID`, `KESTRA_CIDADE_ID`, `KESTRA_MES_REFERENCIA`, `KESTRA_CARGA_COMPLETA`):
