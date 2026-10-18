@@ -28,7 +28,7 @@ inputs:
       - DRE_DESPESAS
       - FATURAMENTO
       - RECEITAS
-    required: false
+    required: true
     defaults: "TODOS"
     description: "Selecione o que deseja extrair: TODOS, DRE_DESPESAS, FATURAMENTO ou RECEITAS"
 
