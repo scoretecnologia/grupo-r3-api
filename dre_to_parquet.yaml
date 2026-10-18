@@ -1,4 +1,4 @@
-﻿id: dre_to_parquet
+id: dre_to_parquet
 namespace: continental.finance
 description: Pipeline para extração de DRE Detalhado e Faturamento da Loja diretamente para o Supabase PostgreSQL
 
@@ -19,8 +19,18 @@ inputs:
   - id: carga_completa
     type: BOOLEAN
     required: true
-    description: "Se true, força extração desde 2025"
+    description: "Se true, força extração desde 2026"
     defaults: false
+  - id: tipo_extracao
+    type: SELECT
+    values:
+      - TODOS
+      - DRE_DESPESAS
+      - FATURAMENTO
+      - RECEITAS
+    required: false
+    defaults: "TODOS"
+    description: "Selecione o que deseja extrair: TODOS, DRE_DESPESAS, FATURAMENTO ou RECEITAS"
 
 triggers:
   - id: schedule
@@ -46,6 +56,7 @@ tasks:
       KESTRA_CIDADE_ID: "{{ trigger.body.cidade_id ?? inputs.cidade_id ?? '' }}"
       KESTRA_MES_REFERENCIA: "{{ trigger.body.mes_referencia ?? inputs.mes_referencia ?? '' }}"
       KESTRA_CARGA_COMPLETA: "{{ trigger.body.carga_completa ?? inputs.carga_completa ?? false }}"
+      KESTRA_TIPO_EXTRACAO: "{{ trigger.body.tipo_extracao ?? inputs.tipo_extracao ?? 'TODOS' }}"
     script: |
       import sys
       import subprocess

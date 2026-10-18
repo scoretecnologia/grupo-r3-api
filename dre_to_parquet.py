@@ -206,7 +206,12 @@ class GrupoR3ETLPipeline:
         cid_id = tarefa['cidade_id']
         nome_cidade = tarefa['cidade'] or "Matriz"
         
-        logger.info(f"\n🔹 Processando Servidor: {srv_id} ({tarefa['loja']}) | Cidade: {nome_cidade}")
+        tipo_ext = (tarefa.get('tipo_extracao') or 'TODOS').upper()
+        rodar_dre = tipo_ext in ['TODOS', 'DRE_DESPESAS', 'DESPESAS', 'DRE']
+        rodar_faturamento = tipo_ext in ['TODOS', 'FATURAMENTO', 'FAT']
+        rodar_receitas = tipo_ext in ['TODOS', 'RECEITAS', 'RECEBER']
+
+        logger.info(f"\n🔹 Processando Servidor: {srv_id} ({tarefa['loja']}) | Cidade: {nome_cidade} | Extração: {tipo_ext}")
         
         if tarefa['carga_completa']:
             logger.info("   ↳ Tipo de Carga: Histórico Completo (desde 2026)")
@@ -237,48 +242,57 @@ class GrupoR3ETLPipeline:
             
             logger.info(f"   📅 Período: {mes_inicio} a {mes_fim}")
             
-            # --- 1. PROCESSAR DRE DETALHADO ---
-            dados_dre = self.fetch_dre(srv_id, mes_inicio, mes_fim, cid_id)
-            if dados_dre:
-                df = pd.DataFrame(dados_dre)
-                if not df.empty:
-                    df['id_servidor'] = srv_id
-                    df['loja'] = tarefa['loja']
-                    df['id_cidade'] = cid_id if cid_id else None
-                    df['cidade'] = nome_cidade
-                    save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim)
+            # --- 1. PROCESSAR DRE DETALHADO (DESPESAS) ---
+            if rodar_dre:
+                dados_dre = self.fetch_dre(srv_id, mes_inicio, mes_fim, cid_id)
+                if dados_dre:
+                    df = pd.DataFrame(dados_dre)
+                    if not df.empty:
+                        df['id_servidor'] = srv_id
+                        df['loja'] = tarefa['loja']
+                        df['id_cidade'] = cid_id if cid_id else None
+                        df['cidade'] = nome_cidade
+                        save_dre_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim)
+                    else:
+                        logger.info("      ↳ DRE retornou lista vazia.")
                 else:
-                    logger.info("      ↳ DRE retornou lista vazia.")
+                    logger.info("      ↳ DRE sem dados ou erro na extração.")
             else:
-                logger.info("      ↳ DRE sem dados ou erro na extração.")
+                logger.info("      ↳ DRE Despesas ignorado pelo filtro de tipo de extração.")
 
             # --- 2. PROCESSAR FATURAMENTO LOJA ---
-            dados_fat = self.fetch_faturamento(srv_id, mes_inicio, mes_fim, cid_id)
-            if dados_fat:
-                save_faturamento_to_supabase_db(dados_fat, srv_id, cid_id, mes_inicio, mes_fim, tarefa['loja'], nome_cidade)
+            if rodar_faturamento:
+                dados_fat = self.fetch_faturamento(srv_id, mes_inicio, mes_fim, cid_id)
+                if dados_fat:
+                    save_faturamento_to_supabase_db(dados_fat, srv_id, cid_id, mes_inicio, mes_fim, tarefa['loja'], nome_cidade)
+                else:
+                    logger.info("      ↳ Faturamento sem dados ou erro na extração.")
             else:
-                logger.info("      ↳ Faturamento sem dados ou erro na extração.")
+                logger.info("      ↳ Faturamento ignorado pelo filtro de tipo de extração.")
 
-            # --- 3. PROCESSAR DRE RECEBER (RECEITAS DETALHADAS) ---
-            # A API Continental dre-detalhado-receber retorna os dados do servidor completo (ignora cidadeId).
-            # Para evitar duplicar as mesmas vendas em cada subloja/filial, processamos apenas na Matriz (cid_id is None).
-            if cid_id is None:
-                try:
-                    dados_rec = self.fetch_dre_receber(srv_id, mes_inicio, mes_fim)
-                    if dados_rec:
-                        df_rec = pd.DataFrame(dados_rec)
-                        if not df_rec.empty:
-                            df_rec['id_servidor'] = srv_id
-                            df_rec['loja'] = tarefa['loja']
-                            df_rec['id_cidade'] = None
-                            df_rec['cidade'] = "Matriz"
-                            save_receber_to_supabase_db(df_rec, srv_id, None, mes_inicio, mes_fim)
+            # --- 3. PROCESSAR DRE RECEBER (RECEITAS CONSOLIDADO) ---
+            if rodar_receitas:
+                # O consolidado de receitas retorna os dados do servidor completo (ignora cidadeId).
+                # Para evitar duplicar nas sublojas, processamos apenas na Matriz (cid_id is None).
+                if cid_id is None:
+                    try:
+                        dados_rec = self.fetch_dre_receber(srv_id, mes_inicio, mes_fim)
+                        if dados_rec:
+                            df_rec = pd.DataFrame(dados_rec)
+                            if not df_rec.empty:
+                                df_rec['id_servidor'] = srv_id
+                                df_rec['loja'] = tarefa['loja']
+                                df_rec['id_cidade'] = None
+                                df_rec['cidade'] = "Matriz"
+                                save_receber_to_supabase_db(df_rec, srv_id, None, mes_inicio, mes_fim)
+                            else:
+                                logger.info("      ↳ DRE Receber retornou lista vazia.")
                         else:
-                            logger.info("      ↳ DRE Receber retornou lista vazia.")
-                    else:
-                        logger.info("      ↳ DRE Receber sem dados ou indisponível no momento.")
-                except Exception as e:
-                    logger.warning(f"      ⚠️ Aviso ao processar DRE Receber: {e}")
+                            logger.info("      ↳ DRE Receber sem dados ou indisponível no momento.")
+                    except Exception as e:
+                        logger.warning(f"      ⚠️ Aviso ao processar DRE Receber: {e}")
+            else:
+                logger.info("      ↳ Receitas ignoradas pelo filtro de tipo de extração.")
                 
             time.sleep(2) # Pausa amigável entre os meses
 
@@ -613,12 +627,14 @@ def get_kestra_overrides():
     mes_ref = os.getenv("KESTRA_MES_REFERENCIA", "").strip()
     carga_comp_raw = os.getenv("KESTRA_CARGA_COMPLETA", "").strip().lower()
     carga_comp = carga_comp_raw in ["true", "1", "t", "yes"]
+    tipo_ext = os.getenv("KESTRA_TIPO_EXTRACAO", "").strip().upper() or "TODOS"
 
     return {
         "servidor_id": srv_id if srv_id and srv_id.upper() != "TODOS" else None,
         "cidade_id": cid_id if cid_id else None,
         "mes_referencia": mes_ref if mes_ref else None,
-        "carga_completa": carga_comp
+        "carga_completa": carga_comp,
+        "tipo_extracao": tipo_ext
     }
 
 if __name__ == "__main__":
@@ -648,8 +664,9 @@ if __name__ == "__main__":
         except ValueError:
             pass
 
-    # Aplica sobrescrita de período se informado no webhook
+    # Aplica sobrescrita de período e tipo de extração se informado no webhook
     for t in tarefas:
+        t["tipo_extracao"] = overrides.get("tipo_extracao") or "TODOS"
         if overrides.get("carga_completa"):
             t["carga_completa"] = True
         elif overrides.get("mes_referencia"):
