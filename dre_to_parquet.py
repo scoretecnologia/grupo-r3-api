@@ -134,6 +134,9 @@ class GrupoR3ETLPipeline:
                     logger.warning(f"Rate limit. Aguardando 10s... (Tentativa {tentativa+1}/{retries})")
                     time.sleep(10)
                 elif response.status_code in [500, 502, 503, 504]:
+                    if any(err in response.text for err in ["I/O error", "CreateFile", "unavailable database", "Error reading data"]):
+                        logger.warning(f"Erro irrecuperável no servidor da loja ({response.status_code}): {response.text[:120]}. Pulando DRE.")
+                        return None
                     logger.warning(f"Erro interno da API ({response.status_code}). Aguardando 5s... (Tentativa {tentativa+1}/{retries})")
                     time.sleep(5)
                 else:
@@ -158,6 +161,9 @@ class GrupoR3ETLPipeline:
                     logger.warning(f"Rate limit Faturamento. Aguardando 10s... (Tentativa {tentativa+1}/{retries})")
                     time.sleep(10)
                 elif response.status_code in [500, 502, 503, 504]:
+                    if any(err in response.text for err in ["I/O error", "CreateFile", "unavailable database", "Error reading data"]):
+                        logger.warning(f"Erro irrecuperável no servidor da loja ({response.status_code}): {response.text[:120]}. Pulando Faturamento.")
+                        return None
                     logger.warning(f"Erro interno API Faturamento ({response.status_code}). Aguardando 5s...")
                     time.sleep(5)
                 else:
@@ -182,6 +188,9 @@ class GrupoR3ETLPipeline:
                     logger.warning(f"Rate limit DRE Receber. Aguardando 10s... (Tentativa {tentativa+1}/{retries})")
                     time.sleep(10)
                 elif response.status_code in [500, 502, 503, 504]:
+                    if any(err in response.text for err in ["I/O error", "CreateFile", "unavailable database", "Error reading data"]):
+                        logger.warning(f"Erro irrecuperável no servidor da loja ({response.status_code}): {response.text[:120]}. Pulando Receber.")
+                        return None
                     logger.warning(f"Erro interno API DRE Receber ({response.status_code}). Aguardando 5s... (Tentativa {tentativa+1}/{retries})")
                     time.sleep(5)
                 else:
