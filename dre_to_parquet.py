@@ -251,22 +251,25 @@ class GrupoR3ETLPipeline:
                 logger.info("      ↳ Faturamento sem dados ou erro na extração.")
 
             # --- 3. PROCESSAR DRE RECEBER (RECEITAS DETALHADAS) ---
-            try:
-                dados_rec = self.fetch_dre_receber(srv_id, mes_inicio, mes_fim, cid_id)
-                if dados_rec:
-                    df_rec = pd.DataFrame(dados_rec)
-                    if not df_rec.empty:
-                        df_rec['id_servidor'] = srv_id
-                        df_rec['loja'] = tarefa['loja']
-                        df_rec['id_cidade'] = cid_id if cid_id else None
-                        df_rec['cidade'] = nome_cidade
-                        save_receber_to_supabase_db(df_rec, srv_id, cid_id, mes_inicio, mes_fim)
+            # A API Continental dre-detalhado-receber retorna os dados do servidor completo (ignora cidadeId).
+            # Para evitar duplicar as mesmas vendas em cada subloja/filial, processamos apenas na Matriz (cid_id is None).
+            if cid_id is None:
+                try:
+                    dados_rec = self.fetch_dre_receber(srv_id, mes_inicio, mes_fim)
+                    if dados_rec:
+                        df_rec = pd.DataFrame(dados_rec)
+                        if not df_rec.empty:
+                            df_rec['id_servidor'] = srv_id
+                            df_rec['loja'] = tarefa['loja']
+                            df_rec['id_cidade'] = None
+                            df_rec['cidade'] = "Matriz"
+                            save_receber_to_supabase_db(df_rec, srv_id, None, mes_inicio, mes_fim)
+                        else:
+                            logger.info("      ↳ DRE Receber retornou lista vazia.")
                     else:
-                        logger.info("      ↳ DRE Receber retornou lista vazia.")
-                else:
-                    logger.info("      ↳ DRE Receber sem dados ou indisponível no momento.")
-            except Exception as e:
-                logger.warning(f"      ⚠️ Aviso ao processar DRE Receber: {e}")
+                        logger.info("      ↳ DRE Receber sem dados ou indisponível no momento.")
+                except Exception as e:
+                    logger.warning(f"      ⚠️ Aviso ao processar DRE Receber: {e}")
                 
             time.sleep(2) # Pausa amigável entre os meses
 
@@ -444,6 +447,15 @@ def save_receber_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
         grupo_pad = depara_entry.get("grupo_dre") or "Receita Operacional"
         natureza_pad = depara_entry.get("natureza") or "Receita"
 
+        val_deb = float(row.get("debito", 0.0)) if not pd.isna(row.get("debito")) else 0.0
+        val_cred = float(row.get("credito", 0.0)) if not pd.isna(row.get("credito")) else 0.0
+        val_liq = float(row.get("valorLiquido", 0.0)) if not pd.isna(row.get("valorLiquido")) else 0.0
+
+        # Sanitizar anomalias da API Continental (onde o código de barras EAN-13 veio no valor da venda)
+        if abs(val_liq) > 1_000_000 or abs(val_cred) > 1_000_000:
+            logger.warning(f"      ⚠️ Lançamento com valor anômalo ignorado (código de barras): {val_liq} / {val_cred}")
+            continue
+
         rec = {
             "id_servidor": int(srv_id),
             "id_cidade": int(cid_id) if cid_id else None,
@@ -457,9 +469,9 @@ def save_receber_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
             "grupo_dre": grupo_pad,
             "natureza": natureza_pad,
             "categoria": str(row[col_cat]) if (col_cat and not pd.isna(row[col_cat])) else "Receitas",
-            "debito": float(row.get("debito", 0.0)) if not pd.isna(row.get("debito")) else 0.0,
-            "credito": float(row.get("credito", 0.0)) if not pd.isna(row.get("credito")) else 0.0,
-            "valor_liquido": float(row.get("valorLiquido", 0.0)) if not pd.isna(row.get("valorLiquido")) else 0.0,
+            "debito": val_deb,
+            "credito": val_cred,
+            "valor_liquido": val_liq,
             "dados_extra": extra_data
         }
         registros.append(rec)
