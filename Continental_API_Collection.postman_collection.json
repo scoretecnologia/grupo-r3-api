@@ -1,0 +1,237 @@
+{
+  "info": {
+    "_postman_id": "a9182374-1234-4567-89ab-cdef01234567",
+    "name": "Continental - Testes Integração Grupo R3",
+    "description": "Coleção de testes para validação dos endpoints da API Continental (DRE Detalhado, Receber, Consolidado e Faturamento).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://continental.feiraodovinte.com.br/api/integracao",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "Continental_@2026_ConsultoriaFinanceira",
+      "type": "string"
+    },
+    {
+      "key": "cfClientId",
+      "value": "7d54c491d71ecf7b64a3668e21443a75.access",
+      "type": "string"
+    },
+    {
+      "key": "cfClientSecret",
+      "value": "ee3123aee9dfe69317f7ee354c5b6d5602a6914706a8fcac640a429562511214",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. DRE Detalhado - Receber (Novo Endpoint)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}",
+            "type": "text"
+          },
+          {
+            "key": "CF-Access-Client-Id",
+            "value": "{{cfClientId}}",
+            "type": "text"
+          },
+          {
+            "key": "CF-Access-Client-Secret",
+            "value": "{{cfClientSecret}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/dre-detalhado-receber?servidorId=5&inicio=2026-09-01&fim=2026-09-16&data=2026-09-02&filtroPlano=11001&filtroConta=1972",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "dre-detalhado-receber"
+          ],
+          "query": [
+            {
+              "key": "servidorId",
+              "value": "5",
+              "description": "ID do servidor da loja (ex: 5 = Piripiri)"
+            },
+            {
+              "key": "inicio",
+              "value": "2026-09-01"
+            },
+            {
+              "key": "fim",
+              "value": "2026-09-16"
+            },
+            {
+              "key": "data",
+              "value": "2026-09-02"
+            },
+            {
+              "key": "filtroPlano",
+              "value": "11001"
+            },
+            {
+              "key": "filtroConta",
+              "value": "1972"
+            }
+          ]
+        },
+        "description": "Endpoint novo enviado pelo desenvolvedor para consulta detalhada das receitas a receber."
+      },
+      "response": []
+    },
+    {
+      "name": "2. DRE Consolidado - Receber (Novo Endpoint)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}",
+            "type": "text"
+          },
+          {
+            "key": "CF-Access-Client-Id",
+            "value": "{{cfClientId}}",
+            "type": "text"
+          },
+          {
+            "key": "CF-Access-Client-Secret",
+            "value": "{{cfClientSecret}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/dre-consolidado-receber?servidorId=5&inicio=2026-09-01&fim=2026-09-16",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "dre-consolidado-receber"
+          ],
+          "query": [
+            {
+              "key": "servidorId",
+              "value": "5"
+            },
+            {
+              "key": "inicio",
+              "value": "2026-09-01"
+            },
+            {
+              "key": "fim",
+              "value": "2026-09-16"
+            }
+          ]
+        },
+        "description": "Endpoint novo para consulta consolidada dos totais a receber."
+      },
+      "response": []
+    },
+    {
+      "name": "3. DRE Detalhado - Despesas / Pagar (Endpoint Existente)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}",
+            "type": "text"
+          },
+          {
+            "key": "CF-Access-Client-Id",
+            "value": "{{cfClientId}}",
+            "type": "text"
+          },
+          {
+            "key": "CF-Access-Client-Secret",
+            "value": "{{cfClientSecret}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/dre-detalhado?servidorId=5&inicio=2026-09-01&fim=2026-09-16",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "dre-detalhado"
+          ],
+          "query": [
+            {
+              "key": "servidorId",
+              "value": "5"
+            },
+            {
+              "key": "inicio",
+              "value": "2026-09-01"
+            },
+            {
+              "key": "fim",
+              "value": "2026-09-16"
+            }
+          ]
+        },
+        "description": "Endpoint existente que traz todas as despesas da loja."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Faturamento Loja (Endpoint Existente)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}",
+            "type": "text"
+          },
+          {
+            "key": "CF-Access-Client-Id",
+            "value": "{{cfClientId}}",
+            "type": "text"
+          },
+          {
+            "key": "CF-Access-Client-Secret",
+            "value": "{{cfClientSecret}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/faturamento-loja?servidorId=5&inicio=2026-09-01&fim=2026-09-16",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "faturamento-loja"
+          ],
+          "query": [
+            {
+              "key": "servidorId",
+              "value": "5"
+            },
+            {
+              "key": "inicio",
+              "value": "2026-09-01"
+            },
+            {
+              "key": "fim",
+              "value": "2026-09-16"
+            }
+          ]
+        },
+        "description": "Endpoint existente que traz o total faturado pela loja."
+      },
+      "response": []
+    }
+  ]
+}

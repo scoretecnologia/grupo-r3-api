@@ -32,7 +32,7 @@ load_env()
 # --- CONFIGURAÇÕES DA API CONTINENTAL ---
 API_BASE_URL = "https://continental.feiraodovinte.com.br/api/integracao"
 API_DRE_URL = f"{API_BASE_URL}/dre-detalhado"
-API_DRE_RECEBER_URL = f"{API_BASE_URL}/dre-detalhado-receber"
+API_DRE_RECEBER_URL = f"{API_BASE_URL}/dre-consolidado-receber"
 API_FATURAMENTO_URL = f"{API_BASE_URL}/faturamento-loja"
 
 API_KEY = os.getenv("DRE_API_KEY")
@@ -425,36 +425,52 @@ def save_receber_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
     endpoint = f"{SUPABASE_API_URL}/rest/v1/grupo_r3_receber_detalhado"
 
     # Sanitizar colunas numéricas
-    for col in ['debito', 'credito', 'valorLiquido']:
+    for col in ['debito', 'credito', 'valorLiquido', 'total']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    col_codigo = next((c for c in ['planoCodigo', 'codigoConta', 'codigo', 'conta'] if c in df.columns), None)
-    col_desc = next((c for c in ['planoDescricao', 'descricaoConta', 'descricao', 'contaDescricao'] if c in df.columns), None)
-    col_cat = next((c for c in ['categoriaPlanoContas', 'categoria', 'categoriaConta'] if c in df.columns), None)
+    col_codigo = next((c for c in ['plaCodigo', 'planoCodigo', 'codigoConta', 'codigo', 'conta'] if c in df.columns), None)
+    col_desc = next((c for c in ['plaDescricao', 'planoDescricao', 'descricaoConta', 'descricao', 'contaDescricao'] if c in df.columns), None)
+    col_cat = next((c for c in ['caiDescricao', 'categoriaPlanoContas', 'categoria', 'categoriaConta'] if c in df.columns), None)
+    col_conta_desc = next((c for c in ['caiDescricao', 'contaDescricao'] if c in df.columns), None)
+    col_data = next((c for c in ['caiData', 'data'] if c in df.columns), None)
 
-    known_cols = {'id_servidor', 'loja', 'id_cidade', 'cidade', 'debito', 'credito', 'valorLiquido', 'codigoConta', 'descricaoConta', 'codigo', 'descricao', 'planoCodigo', 'planoDescricao', 'conta', 'contaDescricao', 'categoriaPlanoContas', 'categoria', 'categoriaConta'}
+    known_cols = {'id_servidor', 'loja', 'id_cidade', 'cidade', 'debito', 'credito', 'valorLiquido', 'total', 'codigoConta', 'descricaoConta', 'codigo', 'descricao', 'planoCodigo', 'planoDescricao', 'plaCodigo', 'plaDescricao', 'conta', 'contaDescricao', 'caiDescricao', 'caiData', 'caiEspecie', 'categoriaPlanoContas', 'categoria', 'categoriaConta'}
 
     depara_map = get_plano_contas_depara()
     registros = []
     for _, row in df.iterrows():
         extra_data = {k: (None if pd.isna(v) else v) for k, v in row.items() if k not in known_cols}
+        if col_conta_desc and col_conta_desc in row and not pd.isna(row[col_conta_desc]):
+            extra_data["conta_financeira"] = str(row[col_conta_desc])
+        if col_data and col_data in row and not pd.isna(row[col_data]):
+            extra_data["data"] = str(row[col_data])
+        if "caiEspecie" in row and not pd.isna(row["caiEspecie"]):
+            extra_data["especie"] = str(row["caiEspecie"])
         
         raw_desc = str(row[col_desc]) if (col_desc and not pd.isna(row[col_desc])) else ""
         norm_desc = normalizar_descricao(raw_desc)
         depara_entry = depara_map.get(norm_desc, {})
-        conta_pad = depara_entry.get("conta_padronizada") or (raw_desc if raw_desc else "Receitas Diversas")
+        conta_pad = depara_entry.get("conta_padronizada") or (raw_desc if raw_desc else "Receitas com Vendas")
         grupo_pad = depara_entry.get("grupo_dre") or "Receita Operacional"
         natureza_pad = depara_entry.get("natureza") or "Receita"
 
-        val_deb = float(row.get("debito", 0.0)) if not pd.isna(row.get("debito")) else 0.0
-        val_cred = float(row.get("credito", 0.0)) if not pd.isna(row.get("credito")) else 0.0
-        val_liq = float(row.get("valorLiquido", 0.0)) if not pd.isna(row.get("valorLiquido")) else 0.0
+        # Se tiver coluna 'total' (consolidado), o valor é total
+        if 'total' in row and not pd.isna(row.get('total')):
+            val_liq = float(row.get('total', 0.0))
+            val_cred = val_liq
+            val_deb = 0.0
+        else:
+            val_deb = float(row.get("debito", 0.0)) if not pd.isna(row.get("debito")) else 0.0
+            val_cred = float(row.get("credito", 0.0)) if not pd.isna(row.get("credito")) else 0.0
+            val_liq = float(row.get("valorLiquido", 0.0)) if not pd.isna(row.get("valorLiquido")) else 0.0
 
         # Sanitizar anomalias da API Continental (onde o código de barras EAN-13 veio no valor da venda)
         if abs(val_liq) > 1_000_000 or abs(val_cred) > 1_000_000:
             logger.warning(f"      ⚠️ Lançamento com valor anômalo ignorado (código de barras): {val_liq} / {val_cred}")
             continue
+
+        categoria_nome = str(row[col_cat]) if (col_cat and not pd.isna(row[col_cat])) else "Receitas"
 
         rec = {
             "id_servidor": int(srv_id),
@@ -468,7 +484,7 @@ def save_receber_to_supabase_db(df, srv_id, cid_id, mes_inicio, mes_fim):
             "conta_padronizada": conta_pad,
             "grupo_dre": grupo_pad,
             "natureza": natureza_pad,
-            "categoria": str(row[col_cat]) if (col_cat and not pd.isna(row[col_cat])) else "Receitas",
+            "categoria": categoria_nome,
             "debito": val_deb,
             "credito": val_cred,
             "valor_liquido": val_liq,
