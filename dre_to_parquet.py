@@ -200,8 +200,8 @@ class GrupoR3ETLPipeline:
         logger.info(f"\n🔹 Processando Servidor: {srv_id} ({tarefa['loja']}) | Cidade: {nome_cidade}")
         
         if tarefa['carga_completa']:
-            logger.info("   ↳ Tipo de Carga: Histórico Completo (desde 2025)")
-            start_dt = pd.to_datetime("2025-01-01")
+            logger.info("   ↳ Tipo de Carga: Histórico Completo (desde 2026)")
+            start_dt = pd.to_datetime("2026-01-01")
             now = datetime.now()
             end_dt = pd.to_datetime(f"{now.year}-{now.month:02d}-01") + pd.offsets.MonthEnd(1)
         else:
