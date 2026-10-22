@@ -130,9 +130,13 @@ CREATE TABLE IF NOT EXISTS public.grupo_r3_faturamento_loja (
     mes_fim DATE NOT NULL,
     codigo_loja INT,
     total_faturamento NUMERIC(15, 2) DEFAULT 0.00,
+    cmv NUMERIC(15, 2) DEFAULT 0.00,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Garantir coluna cmv caso tabela já exista
+ALTER TABLE public.grupo_r3_faturamento_loja ADD COLUMN IF NOT EXISTS cmv NUMERIC(15, 2) DEFAULT 0.00;
 
 CREATE INDEX IF NOT EXISTS idx_fat_servidor_cidade ON public.grupo_r3_faturamento_loja (id_servidor, id_cidade);
 CREATE INDEX IF NOT EXISTS idx_fat_periodo ON public.grupo_r3_faturamento_loja (mes_inicio, mes_fim);

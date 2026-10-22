@@ -580,16 +580,21 @@ def save_faturamento_to_supabase_db(dados_fat, srv_id, cid_id, mes_inicio, mes_f
         logger.error(f"      ❌ Erro ao deletar Faturamento antigo: {e}")
 
     total_fat = 0.0
+    total_cmv = 0.0
     cod_loja = cid_id or srv_id
 
     if isinstance(dados_fat, dict):
         val = dados_fat.get("totalFaturamento")
         total_fat = float(val) if val is not None else 0.0
+        val_cmv = dados_fat.get("cmv")
+        total_cmv = float(val_cmv) if val_cmv is not None else 0.0
         if dados_fat.get("codigoLoja"):
             cod_loja = dados_fat.get("codigoLoja")
     elif isinstance(dados_fat, list) and len(dados_fat) > 0:
         val = dados_fat[0].get("totalFaturamento")
         total_fat = float(val) if val is not None else 0.0
+        val_cmv = dados_fat[0].get("cmv")
+        total_cmv = float(val_cmv) if val_cmv is not None else 0.0
         if dados_fat[0].get("codigoLoja"):
             cod_loja = dados_fat[0].get("codigoLoja")
 
@@ -601,13 +606,14 @@ def save_faturamento_to_supabase_db(dados_fat, srv_id, cid_id, mes_inicio, mes_f
         "mes_inicio": str(mes_inicio),
         "mes_fim": str(mes_fim),
         "codigo_loja": int(cod_loja) if cod_loja is not None else None,
-        "total_faturamento": total_fat
+        "total_faturamento": total_fat,
+        "cmv": total_cmv
     }
 
     try:
         resp = requests.post(endpoint, headers=headers, json=[rec])
         if resp.status_code in [200, 201]:
-            logger.info(f"      💰 Faturamento salvo no Banco: R$ {total_fat:,.2f} na tabela grupo_r3_faturamento_loja")
+            logger.info(f"      💰 Faturamento salvo no Banco: R$ {total_fat:,.2f} | CMV: R$ {total_cmv:,.2f} em grupo_r3_faturamento_loja")
             return True
         else:
             logger.error(f"      ❌ Erro ao salvar Faturamento no Banco: {resp.status_code} - {resp.text}")
